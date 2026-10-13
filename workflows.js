@@ -30,6 +30,13 @@ const ANIMATE_CLIP_VISION = "clip_vision_h.safetensors";
 const ANIMATE_VITPOSE = "vitpose-l-wholebody.onnx";
 const ANIMATE_YOLO = "yolov10m.onnx";
 
+const H3_UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors";
+const H3_CLIP = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors";
+const H3_VAE = "minimax_h3_video_vae_fp16.safetensors";
+const H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors";
+const H3_LORA = { 4: "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+  8: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors" };
+
 const LTX_CKPT = "ltx-2-19b-distilled-fp8.safetensors";
 const LTX_GEMMA = "gemma_3_12B_it_fp4_mixed.safetensors";
 const LTX_UPSCALER = "ltx-2-spatial-upscaler-x2-1.0.safetensors";
@@ -271,6 +278,41 @@ function ltx2_t2v(p) {
   }, []];
 }
 
+function minimax_h3(p) {
+  const w = roundTo(p.width ?? 1344, 32, 256, 1920), h = roundTo(p.height ?? 768, 32, 256, 1920);
+  const seconds = Math.max(2, Math.min(15, num(p.seconds, 5)));
+  const n = Math.max(5, Math.round(seconds * 24));
+  const length = n + ((5 - n % 17) % 17 + 17) % 17;  // H3 wants 17k+5 frames (Python-style modulo)
+  const steps = p.quality === "high" ? 8 : 4;
+  const wf = {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: H3_UNET, weight_dtype: "default" } },
+    "2": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: H3_LORA[steps], strength_model: 1.0 } },
+    "3": { class_type: "CLIPLoader", inputs: { clip_name: H3_CLIP, type: "minimax", device: "default" } },
+    "4": { class_type: "VAELoader", inputs: { vae_name: H3_VAE } },
+    "5": { class_type: "VAELoader", inputs: { vae_name: H3_AUDIO_VAE } },
+    "7": { class_type: "MiniMaxH3ImageToVideo", inputs: {
+      clip: ["3", 0], vae: ["4", 0], prompt: p.prompt || "", width: w, height: h, length } },
+    "8": { class_type: "RandomNoise", inputs: { noise_seed: seedOf(p) } },
+    "9": { class_type: "KSamplerSelect", inputs: { sampler_name: "res_multistep" } },
+    "10": { class_type: "BasicScheduler", inputs: { model: ["2", 0], scheduler: "simple", steps, denoise: 1.0 } },
+    "11": { class_type: "BasicGuider", inputs: { model: ["2", 0], conditioning: ["7", 0] } },
+    "12": { class_type: "SamplerCustomAdvanced", inputs: {
+      noise: ["8", 0], guider: ["11", 0], sampler: ["9", 0], sigmas: ["10", 0], latent_image: ["7", 1] } },
+    "13": { class_type: "VAEDecode", inputs: { samples: ["12", 0], vae: ["4", 0] } },
+    "14": { class_type: "VAEDecodeAudio", inputs: { samples: ["12", 0], vae: ["5", 0] } },
+    "15": { class_type: "CreateVideo", inputs: { images: ["13", 0], audio: ["14", 0], fps: 24.0 } },
+    "16": { class_type: "SaveVideo", inputs: { video: ["15", 0], filename_prefix: "video/minimax_h3", format: "auto", codec: "auto" } },
+  };
+  let uploads = [];
+  if (p.image) {
+    let name;
+    [name, uploads] = upload(p);
+    wf["6"] = { class_type: "LoadImage", inputs: { image: name } };
+    wf["7"].inputs.first_frame = ["6", 0];
+  }
+  return [wf, uploads];
+}
+
 // ------------------------------------------------------------------ audio
 
 function stable_audio(p) {
@@ -450,5 +492,6 @@ function wake_up() {
   }, []];
 }
 
-const TOOLS = { qwen_image, qwen_edit, klein_image, klein_edit, wan_i2v, wan_animate, ltx2_t2v,
-  stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hunyuan_3d, hy_motion, wake_up };
+// klein_*, ltx2_t2v and hunyuan_3d stay above for reference; their models were removed from the volume.
+const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_animate, minimax_h3,
+  stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hy_motion, wake_up };

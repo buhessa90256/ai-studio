@@ -106,6 +106,8 @@
   .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
   .thumb .kind { position: absolute; left: 6px; bottom: 6px; font-size: 11px; background: rgba(0,0,0,.55); color: #fff;
     padding: 2px 7px; border-radius: 999px; }
+  .thumb .dl { position: absolute; right: 5px; top: 5px; width: 30px; height: 30px; border-radius: 8px; border: 0;
+    background: rgba(0,0,0,.55); color: #fff; display: flex; align-items: center; justify-content: center; padding: 0; }
   .thumb .glyph { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 30px; color: var(--accent); }
   .empty { color: var(--muted); text-align: center; padding: 32px 12px; font-size: 14px; }
 
@@ -300,19 +302,17 @@ const deleteItem = id => dbDo("readwrite", s => s.delete(id));
 const SIZES_IMG = [["1024x1024", "Square"], ["832x1216", "Portrait"], ["1216x832", "Landscape"], ["1344x768", "Wide 16:9"]];
 const SHAPES = [["832x480", "Landscape"], ["480x832", "Portrait"], ["640x640", "Square"]];
 const UI = [
-  { id: "image", group: "Images", glyph: "✦", title: "Create image", desc: "Describe a picture", pick: "model",
+  { id: "image", group: "Images", glyph: "✦", title: "Create image", desc: "Describe a picture", tool: "qwen_image",
     fields: [
-      { type: "chips", name: "model", label: "Model", options: [["qwen_image", "Best quality"], ["klein_image", "Fast"]] },
       { type: "text", name: "prompt", label: "Describe the image", placeholder: "A cozy coffee shop on a rainy evening, warm lights, cinematic photo" },
       { type: "chips", name: "size", label: "Shape", options: SIZES_IMG },
-      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true, when: f => f.model === "qwen_image" },
+      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true },
     ] },
-  { id: "edit", group: "Images", glyph: "✎", title: "Edit image", desc: "Change a photo with words", pick: "model",
+  { id: "edit", group: "Images", glyph: "✎", title: "Edit image", desc: "Change a photo with words", tool: "qwen_edit",
     fields: [
-      { type: "chips", name: "model", label: "Model", options: [["qwen_edit", "Best quality"], ["klein_edit", "Fast"]] },
       { type: "image", name: "image", label: "Photo" },
       { type: "text", name: "prompt", label: "What should change?", placeholder: "Make it night time with neon lights" },
-      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true, when: f => f.model === "qwen_edit" },
+      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true },
     ] },
   { id: "i2v", group: "Video", glyph: "▶", title: "Animate a photo", desc: "Photo to video clip", tool: "wan_i2v",
     fields: [
@@ -321,12 +321,14 @@ const UI = [
       { type: "chips", name: "size", label: "Shape", options: SHAPES },
       { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 1, max: 10, step: 1 },
     ] },
-  { id: "t2v", group: "Video", glyph: "♪", title: "Video with sound", desc: "Text to video + audio", tool: "ltx2_t2v",
+  { id: "t2v", group: "Video", glyph: "♪", title: "Video with sound", desc: "MiniMax-H3 video + audio", tool: "minimax_h3",
     fields: [
-      { type: "text", name: "prompt", label: "Describe the scene and sounds", placeholder: "A street musician plays saxophone under a bridge at night, rain falling" },
-      { type: "chips", name: "size", label: "Shape", options: [["1280x704", "Landscape"], ["704x1280", "Portrait"], ["960x544", "Small, faster"]] },
-      { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 2, max: 10, step: 1 },
-    ] },
+      { type: "image", name: "image", label: "Start photo (optional)", optional: true },
+      { type: "text", name: "prompt", label: "Describe the scene and the sound", placeholder: "A street musician plays saxophone under a bridge at night, rain falling" },
+      { type: "chips", name: "size", label: "Shape", options: [["1344x768", "Landscape"], ["768x1344", "Portrait"], ["1024x1024", "Square"]] },
+      { type: "chips", name: "quality", label: "Quality", options: [["fast", "Fast"], ["high", "Best"]] },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 2, max: 15, step: 1 },
+    ], hint: "Describe the sound too. The first run after a break loads a large model and takes several minutes." },
   { id: "animate", group: "Video", glyph: "☺", title: "Character animation", desc: "Copy moves from a video", tool: "wan_animate",
     fields: [
       { type: "image", name: "image", label: "Character picture" },
@@ -353,13 +355,12 @@ const UI = [
       { type: "text", name: "prompt", label: "Describe the sound", placeholder: "Heavy rain on a tin roof with distant thunder" },
       { type: "number", name: "seconds", label: "Length (seconds)", value: 10, min: 1, max: 47, step: 1 },
     ] },
-  { id: "model3d", group: "3D", glyph: "◆", title: "3D model", desc: "Photo of an object to 3D", pick: "engine",
+  { id: "model3d", group: "3D", glyph: "◆", title: "3D model", desc: "Photo of an object to 3D", tool: "trellis_3d",
     fields: [
-      { type: "chips", name: "engine", label: "Engine", options: [["trellis_3d", "TRELLIS.2"], ["hunyuan_3d", "Hunyuan3D 2.1"]] },
       { type: "image", name: "image", label: "Object photo", keepPng: true },
       { type: "chips", name: "detail", label: "Detail", options: [["low", "Low-poly"], ["standard", "Standard"], ["high", "High"]], value: "standard" },
       { type: "chips", name: "texture_size", label: "Texture", options: [["1024", "1K"], ["2048", "2K"]] },
-      { type: "check", name: "remove_background", label: "Remove background", value: true, when: f => f.engine === "trellis_3d" },
+      { type: "check", name: "remove_background", label: "Remove background", value: true },
     ], hint: "One object, fully visible, plain background works best." },
   { id: "motion", group: "3D", glyph: "⟳", title: "3D motion", desc: "Text to body animation", tool: "hy_motion",
     fields: [
@@ -556,10 +557,12 @@ async function buildParams(t, btn) {
   const tool = t.tool || v[t.pick];
   const need = (cond, msg) => { if (!cond) throw new InputError(msg); };
   if (t.fields.some(x => x.name === "prompt" && !x.optional)) need(p.prompt, tool === "f5_voice" ? "Please type the text to speak." : "Please write a description first.");
-  if (t.fields.some(x => x.type === "image")) {
-    need(f.image, "Please choose a picture first.");
-    p.image = await readImage(f.image, 1536, t.fields.find(x => x.type === "image").keepPng);
+  const imgField = t.fields.find(x => x.type === "image");
+  if (imgField) {
+    need(f.image || imgField.optional, "Please choose a picture first.");
+    if (f.image) p.image = await readImage(f.image, 1536, imgField.keepPng);
   }
+  if (v.quality) p.quality = v.quality;
   if (tool === "wan_animate") {
     need(f.video, "Please choose a movement video.");
     const r = await resampleVideo(f.video, { maxSeconds: Number(p.seconds || 5) + 0.5, onProgress: x => btn.textContent = `Preparing video… ${Math.round(x * 100)}%` });
@@ -707,12 +710,12 @@ async function saveFile(file) {
 function itemActions(item) {
   const f = item.files[0], acts = [button("Save / Share", () => saveFile(f), "btn")];
   const isImg = /\.(png|jpg|jpeg|webp)$/.test(f.ext), isVid = /\.(mp4|webm)$/.test(f.ext);
-  const use = (toolId, field) => button({ edit: "Edit", i2v: "Animate", model3d: "Make 3D", upscale: "Upscale" }[toolId], () => {
+  const use = (toolId, field) => button({ edit: "Edit", i2v: "Animate", t2v: "Video + sound", model3d: "Make 3D", upscale: "Upscale" }[toolId], () => {
     closeViewer();
     (files[toolId] ??= {})[field] = new File([f.blob], f.name, { type: f.blob.type });
     openTool(toolId, true); $("#tool-result").hidden = true;
   });
-  if (isImg) acts.push(use("edit", "image"), use("i2v", "image"), use("model3d", "image"));
+  if (isImg) acts.push(use("edit", "image"), use("i2v", "image"), use("t2v", "image"), use("model3d", "image"));
   if ((isImg || isVid) && item.tool !== "seedvr2_upscale" && item.tool !== "stable_audio") acts.push(use("upscale", "media"));
   return acts;
 }
@@ -724,7 +727,7 @@ async function renderGallery() {
   if (!items.length && !pend.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`; return; }
   grid.innerHTML = "";
   for (const j of pend) {
-    const b = button("", () => openTool(UI_BY_TOOL[j.tool].id), "thumb");
+    const b = button("", () => UI_BY_TOOL[j.tool] && openTool(UI_BY_TOOL[j.tool].id), "thumb");
     b.innerHTML = `<div class="glyph"><div class="spin"></div></div><span class="kind">${esc(UI_BY_TOOL[j.tool]?.title || j.tool)}</span>`;
     grid.append(b);
   }
@@ -734,6 +737,11 @@ async function renderGallery() {
     b.innerHTML = /\.(png|jpg|jpeg|webp)$/.test(f.ext) ? `<img src="${url}" alt="" loading="lazy">`
       : /\.(mp4|webm)$/.test(f.ext) && it.tool !== "stable_audio" ? `<video src="${url}#t=0.5" muted playsinline preload="metadata"></video><span class="kind">video</span>`
       : `<div class="glyph">${UI_BY_TOOL[it.tool]?.glyph || "•"}</div><span class="kind">${esc(kind)}</span>`;
+    const dl = Object.assign(document.createElement("span"), { className: "dl", role: "button", tabIndex: 0 });
+    dl.onclick = e => { e.stopPropagation(); saveFile(f); };
+    dl.setAttribute("role", "button"); dl.setAttribute("aria-label", "Save " + kind);
+    dl.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.8 8 10.3l3.5-3.5M3 13.5h10"/></svg>`;
+    b.append(dl);
     grid.append(b);
   }
 }
