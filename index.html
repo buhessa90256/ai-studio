@@ -122,6 +122,11 @@
   nav button.on { color: var(--accent); font-weight: 650; }
   .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent);
     color: var(--accent-ink); font-size: 11px; line-height: 18px; font-weight: 700; }
+  .ideas-btn { float: right; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 650; padding: 0; }
+  .idea { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; padding: 12px 2px; }
+  .idea b { display: block; font-size: 15px; }
+  .idea span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: 13px; }
+  .idea-full { white-space: pre-wrap; font-size: 14.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
   .pin { letter-spacing: .5em; text-align: center; font-size: 24px !important; }
 </style>
 </head>
@@ -207,6 +212,12 @@
   <button type="button" data-view="gallery"><span>▦</span>Results <b class="badge" id="busy-badge" hidden></b></button>
   <button type="button" data-view="settings"><span>⚙</span>Settings</button>
 </nav>
+
+<!-- Prompt ideas from prompts.chat -->
+<div class="sheet" id="ideas" hidden>
+  <div class="top"><button class="back" id="ideas-close" aria-label="Close">‹</button><b id="ideas-title">Prompt ideas</b></div>
+  <div id="ideas-body"></div>
+</div>
 
 <!-- Full-screen viewer for a saved result -->
 <div class="sheet" id="viewer" hidden>
@@ -408,8 +419,8 @@ function renderForm() {
     const id = `f-${t.id}-${f.name}`;
     if (f.type === "chips") return `<label class="lbl">${f.label}</label><div class="chips" data-name="${f.name}">${
       f.options.map(([val, lab]) => `<button type="button" data-v="${val}" class="${String(v[f.name]) === String(val) ? "on" : ""}">${lab}</button>`).join("")}</div>`;
-    if (f.type === "text") return `<label class="lbl" for="${id}">${f.label}</label><textarea id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}">${esc(v[f.name])}</textarea>`;
-    if (f.type === "line") return `<label class="lbl" for="${id}">${f.label}</label><input type="text" id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}" value="${esc(v[f.name])}">`;
+    if (f.type === "text") return `<label class="lbl" for="${id}">${f.label}${f.name === "prompt" && IDEA_KIND[t.id] ? `<button type="button" class="ideas-btn" data-ideas>Ideas</button>` : ""}</label><textarea id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}">${esc(v[f.name])}</textarea>`;
+    if (f.type === "line") return `<label class="lbl" for="${id}">${f.label}${f.name === "prompt" && IDEA_KIND[t.id] ? `<button type="button" class="ideas-btn" data-ideas>Ideas</button>` : ""}</label><input type="text" id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}" value="${esc(v[f.name])}">`;
     if (f.type === "number") return `<label class="lbl" for="${id}">${f.label}</label><input type="number" inputmode="decimal" id="${id}" data-name="${f.name}" min="${f.min}" max="${f.max}" step="${f.step}" value="${esc(v[f.name])}">`;
     if (f.type === "check") return `<label class="check"><input type="checkbox" data-name="${f.name}" ${v[f.name] ? "checked" : ""}> ${f.label}</label>`;
     const accept = { image: "image/*", video: "video/*", audio: "audio/*", media: "image/*,video/*" }[f.type];
@@ -433,7 +444,55 @@ function renderForm() {
     input.click();
   };
   form.onsubmit = e => { e.preventDefault(); submit(); };
+  const ib = $("[data-ideas]", form);
+  if (ib) ib.onclick = e => { e.preventDefault(); openIdeas(t); };
 }
+
+// ------------------------------------------------------------------ prompt ideas (prompts.chat, CC0)
+const IDEA_KIND = { image: ["IMAGE", false], edit: ["IMAGE", true], i2v: ["VIDEO", true], t2v: ["VIDEO", false],
+  animate: ["VIDEO", false], sfx: ["AUDIO", false] };
+let IDEAS = null;
+const fillTemplate = x => x.replace(/\$\{([^}:]+)(?::([^}]*))?\}/g, (m, name, def) => (def ?? name).trim());
+async function openIdeas(t) {
+  const sheet = $("#ideas"), body = $("#ideas-body");
+  sheet.hidden = false; $("#ideas-title").textContent = "Prompt ideas";
+  body.innerHTML = `<div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Loading ideas…</div>`;
+  try { IDEAS ??= (await (await fetch("prompts.json")).json()).prompts; }
+  catch { body.innerHTML = `<div class="empty">Couldn't load ideas. Check your connection.</div>`; return; }
+  const [type, photoFirst] = IDEA_KIND[t.id];
+  const pool = IDEAS.filter(p => p.type === type).sort((a, b) => photoFirst ? b.photo - a.photo : a.photo - b.photo);
+  body.innerHTML = `<input type="text" id="ideas-q" placeholder="Search ${pool.length} ideas" aria-label="Search ideas"><div id="ideas-list" style="margin-top:6px"></div>
+    <p class="hint">Ideas from prompts.chat</p>`;
+  const q = $("#ideas-q"), list = $("#ideas-list");
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    const hits = pool.filter(p => !s || (p.title + " " + p.text).toLowerCase().includes(s))
+      .sort((a, b) => s ? b.title.toLowerCase().includes(s) - a.title.toLowerCase().includes(s) : 0).slice(0, 80);
+    list.innerHTML = hits.length ? "" : `<div class="empty">No ideas match.</div>`;
+    for (const p of hits) {
+      const b = button("", () => preview(p), "idea");
+      b.innerHTML = "<b></b><span></span>";
+      b.querySelector("b").textContent = p.title + (p.photo ? " · uses your photo" : "");
+      b.querySelector("span").textContent = p.text;
+      list.append(b);
+    }
+  };
+  const preview = p => {
+    $("#ideas-title").textContent = p.title;
+    body.innerHTML = `<div class="idea-full"></div><button class="go" type="button" id="idea-use">Use this prompt</button>
+      <div class="row" style="margin-top:10px"><button class="btn" type="button" id="idea-back">Back to ideas</button></div>`;
+    $(".idea-full", body).textContent = fillTemplate(p.text);
+    $("#idea-back").onclick = () => openIdeas(t);
+    $("#idea-use").onclick = () => {
+      values[t.id].prompt = fillTemplate(p.text);
+      sheet.hidden = true; renderForm();
+      const el = $("#tool-form [data-name=prompt]"); el?.focus();
+    };
+    window.scrollTo(0, 0); sheet.scrollTop = 0;
+  };
+  q.oninput = draw; draw();
+}
+$("#ideas-close").onclick = () => { $("#ideas").hidden = true; };
 function showPicked(pick, f) {
   const url = URL.createObjectURL(f), kind = f.type.split("/")[0];
   pick.classList.add("has");
