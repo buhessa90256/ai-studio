@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5b4fe0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="AI Studio">
+<meta name="robots" content="noindex, nofollow">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>AI Studio</title>
+<style>
+  /* Phone-first: one tool per screen, big touch targets, bottom navigation. */
+  :root {
+    --bg: #f5f4f8; --panel: #ffffff; --ink: #1b1a22; --muted: #6c6a78; --line: #e4e2ec;
+    --accent: #5b4fe0; --accent-ink: #ffffff; --soft: #eceafe; --ok: #1f8a4c; --warn: #b7791f; --bad: #c0392b;
+    --radius: 14px; --nav-h: 64px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121117; --panel: #1c1b23; --ink: #ecebf3; --muted: #9b99a8; --line: #2c2a36;
+      --accent: #8f85ff; --accent-ink: #121117; --soft: #26234a; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121117; --panel: #1c1b23; --ink: #ecebf3; --muted: #9b99a8; --line: #2c2a36;
+    --accent: #8f85ff; --accent-ink: #121117; --soft: #26234a; color-scheme: dark;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); }
+  [hidden] { display: none !important; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; flex: 1; display: flex; align-items: center; gap: 8px; }
+  .back { border: 0; background: none; font-size: 22px; padding: 0 6px 0 0; line-height: 1; }
+  .gpu { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--bg);
+    border-radius: 999px; padding: 6px 12px; font-size: 13px; color: var(--muted); }
+  .gpu.warm { border-color: var(--ok); color: var(--ink); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+  main { padding: 16px; max-width: 720px; margin: 0 auto; }
+  .group { margin: 4px 0 18px; }
+  .group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px 2px; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius);
+    padding: 14px; min-height: 92px; display: flex; flex-direction: column; gap: 4px; }
+  .tile b { font-size: 15.5px; }
+  .tile span { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+  .tile i { font-style: normal; font-size: 20px; line-height: 1; margin-bottom: 4px; color: var(--accent); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .card + .card { margin-top: 12px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 6px; }
+  label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  textarea, input[type=text], input[type=password], input[type=number], input[type=tel] {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 16px; }
+  textarea { min-height: 96px; resize: vertical; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+  .chips button.on { background: var(--soft); border-color: var(--accent); font-weight: 600; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 15px; }
+  .check input { width: 20px; height: 20px; }
+  .pick { width: 100%; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--bg); padding: 18px; text-align: center;
+    color: var(--muted); font-size: 14px; }
+  .pick.has { padding: 6px; border-style: solid; }
+  .pick img, .pick video { max-width: 100%; max-height: 240px; border-radius: 8px; display: block; margin: 0 auto; }
+  .pick audio { width: 100%; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .go { width: 100%; margin-top: 18px; padding: 15px; border: 0; border-radius: 12px; background: var(--accent);
+    color: var(--accent-ink); font-weight: 650; font-size: 16px; }
+  .go:disabled { opacity: .55; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  .btn.danger { color: var(--bad); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 0; }
+
+  .result { margin-top: 12px; }
+  .stage { border-radius: 12px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; min-height: 120px;
+    display: flex; align-items: center; justify-content: center; }
+  .stage img, .stage video { width: 100%; display: block; }
+  .stage audio { width: 92%; margin: 24px 0; }
+  .stage model-viewer { width: 100%; height: 360px; background: var(--bg); }
+  .stage iframe { width: 100%; height: 520px; border: 0; }
+  .status { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .status .err { color: var(--bad); overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .spin { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+    animation: s 1s linear infinite; flex: none; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+
+  .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .thumb { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--panel);
+    border: 1px solid var(--line); padding: 0; }
+  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .kind { position: absolute; left: 6px; bottom: 6px; font-size: 11px; background: rgba(0,0,0,.55); color: #fff;
+    padding: 2px 7px; border-radius: 999px; }
+  .thumb .glyph { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 30px; color: var(--accent); }
+  .empty { color: var(--muted); text-align: center; padding: 32px 12px; font-size: 14px; }
+
+  .sheet { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .sheet .top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .sheet .top b { flex: 1; }
+
+  nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; background: var(--panel);
+    border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  nav button { flex: 1; height: var(--nav-h); border: 0; background: none; font-size: 12.5px; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+  nav button span { font-size: 20px; line-height: 1; }
+  nav button.on { color: var(--accent); font-weight: 650; }
+  .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent);
+    color: var(--accent-ink); font-size: 11px; line-height: 18px; font-weight: 700; }
+  .pin { letter-spacing: .5em; text-align: center; font-size: 24px !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1><button class="back" id="back" hidden aria-label="Back">‹</button><span id="title">AI Studio</span></h1>
+  <button class="gpu" id="gpu" type="button"><span class="dot"></span><span>GPU</span></button>
+</header>
+
+<main>
+  <!-- Lock screen: the RunPod key is stored on this phone, encrypted with a PIN -->
+  <section id="v-lock" hidden>
+    <div class="card">
+      <h2 style="margin:0 0 4px;font-size:18px">Unlock AI Studio</h2>
+      <p class="sub">Enter your PIN to use your RunPod key on this phone.</p>
+      <input id="unlock-pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="PIN">
+      <button class="go" id="unlock-go" type="button">Unlock</button>
+      <p class="hint" id="unlock-msg"></p>
+    </div>
+  </section>
+
+  <!-- First run: save key + PIN -->
+  <section id="v-setup" hidden>
+    <div class="card">
+      <h2 style="margin:0 0 4px;font-size:18px">Set up AI Studio</h2>
+      <p class="sub">Your RunPod API key is saved only on this phone, locked with a PIN. It is never part of the website.</p>
+      <label class="lbl" for="setup-key">RunPod API key</label>
+      <input id="setup-key" type="password" autocomplete="off" placeholder="rpa_…">
+      <label class="lbl" for="setup-pin">Choose a PIN (4–12 digits)</label>
+      <input id="setup-pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12">
+      <label class="lbl" for="setup-endpoint">Endpoint ID</label>
+      <input id="setup-endpoint" type="text" value="5mginm1hj3ns0n" autocomplete="off">
+      <button class="go" id="setup-go" type="button">Save and start</button>
+      <p class="hint" id="setup-msg"></p>
+    </div>
+  </section>
+
+  <!-- Home: pick a tool -->
+  <section id="v-home" hidden></section>
+
+  <!-- One tool -->
+  <section id="v-tool" hidden>
+    <form class="card" id="tool-form" autocomplete="off"></form>
+    <div class="card result" id="tool-result" hidden>
+      <div class="stage" id="tool-stage"></div>
+      <div class="status" id="tool-status"></div>
+      <div class="actions" id="tool-actions"></div>
+    </div>
+  </section>
+
+  <!-- Gallery -->
+  <section id="v-gallery" hidden>
+    <div class="gallery" id="gallery"></div>
+  </section>
+
+  <!-- Settings -->
+  <section id="v-settings" hidden>
+    <div class="card">
+      <h2 style="margin:0 0 6px;font-size:16px">GPU</h2>
+      <p class="sub" id="gpu-detail">Checking…</p>
+      <label class="check"><input type="checkbox" id="warm"> Keep GPU warm while AI Studio is open</label>
+      <p class="hint">Wakes the GPU now and keeps it ready so jobs start fast. It costs about $1.22–1.75 per hour while
+        warm. When you close AI Studio, the GPU falls asleep by itself within 10 minutes and costs nothing.</p>
+    </div>
+    <div class="card">
+      <h2 style="margin:0 0 6px;font-size:16px">Security</h2>
+      <p class="sub">Your key is stored on this phone only, encrypted with your PIN.</p>
+      <div class="row">
+        <button class="btn" type="button" id="lock-now">Lock now</button>
+        <button class="btn danger" type="button" id="forget">Remove key from phone</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin:0 0 6px;font-size:16px">Storage</h2>
+      <p class="sub" id="storage-info">Your results are saved on this phone.</p>
+      <button class="btn danger" type="button" id="clear-gallery">Delete all saved results</button>
+    </div>
+  </section>
+</main>
+
+<nav id="nav">
+  <button type="button" data-view="home" class="on"><span>✦</span>Create</button>
+  <button type="button" data-view="gallery"><span>▦</span>Results <b class="badge" id="busy-badge" hidden></b></button>
+  <button type="button" data-view="settings"><span>⚙</span>Settings</button>
+</nav>
+
+<!-- Full-screen viewer for a saved result -->
+<div class="sheet" id="viewer" hidden>
+  <div class="top"><button class="back" id="viewer-close" aria-label="Close">‹</button><b id="viewer-title"></b></div>
+  <div class="stage" id="viewer-stage"></div>
+  <p class="hint" id="viewer-prompt"></p>
+  <div class="actions" id="viewer-actions"></div>
+</div>
+
+<script src="workflows.js"></script>
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const store = {
+  get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+
+// ------------------------------------------------------------------ key + PIN (WebCrypto)
+let API_KEY = null;
+const ENDPOINT = () => store.get("endpoint", "5mginm1hj3ns0n");
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function pinKey(pin, salt) {
+  const base = await crypto.subtle.importKey("raw", enc.encode(pin), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 250000, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function saveKey(key, pin) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await pinKey(pin, salt), enc.encode(key));
+  store.set("vault", { salt: b64(salt), iv: b64(iv), ct: b64(ct) });
+}
+async function openKey(pin) {
+  const v = store.get("vault");
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(v.iv) }, await pinKey(pin, unb64(v.salt)), unb64(v.ct));
+  return dec.decode(pt);
+}
+function remember(key) {  // stays unlocked until the browser tab is closed
+  API_KEY = key;
+  try { sessionStorage.setItem("k", key); } catch {}
+}
+
+// ------------------------------------------------------------------ RunPod
+async function runpod(method, path, body) {
+  const r = await fetch(`https://api.runpod.ai/v2/${ENDPOINT()}/${path}`, {
+    method, headers: { "Authorization": `Bearer ${API_KEY}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const text = await r.text();
+  if (r.status === 401) throw new Error("RunPod didn't accept the key. Check it in Settings.");
+  if (!r.ok) throw new Error(`RunPod error ${r.status}: ${text.slice(0, 200)}`);
+  return text ? JSON.parse(text) : {};
+}
+
+// ------------------------------------------------------------------ saved results (IndexedDB)
+let dbp;
+function db() {
+  return dbp ??= new Promise((res, rej) => {
+    const o = indexedDB.open("ai-studio", 1);
+    o.onupgradeneeded = () => o.result.createObjectStore("items", { keyPath: "id" });
+    o.onsuccess = () => res(o.result); o.onerror = () => rej(o.error);
+  });
+}
+async function dbDo(mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const tx = d.transaction("items", mode), r = fn(tx.objectStore("items"));
+    tx.oncomplete = () => res(r?.result); tx.onerror = () => rej(tx.error);
+  });
+}
+const saveItem = item => dbDo("readwrite", s => s.put(item));
+const allItems = () => dbDo("readonly", s => s.getAll());
+const deleteItem = id => dbDo("readwrite", s => s.delete(id));
+
+// ------------------------------------------------------------------ tools
+const SIZES_IMG = [["1024x1024", "Square"], ["832x1216", "Portrait"], ["1216x832", "Landscape"], ["1344x768", "Wide 16:9"]];
+const SHAPES = [["832x480", "Landscape"], ["480x832", "Portrait"], ["640x640", "Square"]];
+const UI = [
+  { id: "image", group: "Images", glyph: "✦", title: "Create image", desc: "Describe a picture", pick: "model",
+    fields: [
+      { type: "chips", name: "model", label: "Model", options: [["qwen_image", "Best quality"], ["klein_image", "Fast"]] },
+      { type: "text", name: "prompt", label: "Describe the image", placeholder: "A cozy coffee shop on a rainy evening, warm lights, cinematic photo" },
+      { type: "chips", name: "size", label: "Shape", options: SIZES_IMG },
+      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true, when: f => f.model === "qwen_image" },
+    ] },
+  { id: "edit", group: "Images", glyph: "✎", title: "Edit image", desc: "Change a photo with words", pick: "model",
+    fields: [
+      { type: "chips", name: "model", label: "Model", options: [["qwen_edit", "Best quality"], ["klein_edit", "Fast"]] },
+      { type: "image", name: "image", label: "Photo" },
+      { type: "text", name: "prompt", label: "What should change?", placeholder: "Make it night time with neon lights" },
+      { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true, when: f => f.model === "qwen_edit" },
+    ] },
+  { id: "i2v", group: "Video", glyph: "▶", title: "Animate a photo", desc: "Photo to video clip", tool: "wan_i2v",
+    fields: [
+      { type: "image", name: "image", label: "Start image" },
+      { type: "text", name: "prompt", label: "Describe the motion", placeholder: "She turns toward the camera and smiles, hair moving in the wind" },
+      { type: "chips", name: "size", label: "Shape", options: SHAPES },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 1, max: 10, step: 1 },
+    ] },
+  { id: "t2v", group: "Video", glyph: "♪", title: "Video with sound", desc: "Text to video + audio", tool: "ltx2_t2v",
+    fields: [
+      { type: "text", name: "prompt", label: "Describe the scene and sounds", placeholder: "A street musician plays saxophone under a bridge at night, rain falling" },
+      { type: "chips", name: "size", label: "Shape", options: [["1280x704", "Landscape"], ["704x1280", "Portrait"], ["960x544", "Small, faster"]] },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 2, max: 10, step: 1 },
+    ] },
+  { id: "animate", group: "Video", glyph: "☺", title: "Character animation", desc: "Copy moves from a video", tool: "wan_animate",
+    fields: [
+      { type: "image", name: "image", label: "Character picture" },
+      { type: "video", name: "video", label: "Movement video (one person, whole body)" },
+      { type: "line", name: "prompt", label: "Description (optional)", placeholder: "A cartoon fox dancing", optional: true },
+      { type: "chips", name: "size", label: "Shape", options: SHAPES },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 1, max: 7.5, step: 0.5 },
+    ], hint: "The video is converted on your phone first, which takes as long as the clip." },
+  { id: "upscale", group: "Video", glyph: "⤢", title: "Upscale", desc: "Sharpen photos and clips", tool: "seedvr2_upscale",
+    fields: [
+      { type: "media", name: "media", label: "Photo or short video" },
+      { type: "chips", name: "resolution", label: "Target size", options: [["1080", "1080p"], ["1440", "1440p"], ["2160", "4K (photos)"]] },
+    ], hint: "Videos: keep them to a few seconds (under 7 MB)." },
+  { id: "voice", group: "Sound", glyph: "◉", title: "Voiceover", desc: "Text to speech", tool: "f5_voice",
+    fields: [
+      { type: "text", name: "prompt", label: "Text to speak", placeholder: "Welcome to our channel! Today we're making a video entirely with AI." },
+      { type: "chips", name: "voice", label: "Voice", options: [["english", "Voice 1"], ["french", "Voice 2"], ["german", "Voice 3"], ["custom", "My recording"]] },
+      { type: "audio", name: "voice_audio", label: "Recording (5–15 s, one speaker)", when: f => f.voice === "custom" },
+      { type: "line", name: "voice_text", label: "Exact words in the recording", when: f => f.voice === "custom" },
+      { type: "number", name: "speed", label: "Pace (1 = normal, higher = slower)", value: 1, min: 0.5, max: 2, step: 0.1 },
+    ], hint: "Works best in English. Only clone voices you have permission to use." },
+  { id: "sfx", group: "Sound", glyph: "≋", title: "Sound effects", desc: "Ambience and effects", tool: "stable_audio",
+    fields: [
+      { type: "text", name: "prompt", label: "Describe the sound", placeholder: "Heavy rain on a tin roof with distant thunder" },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 10, min: 1, max: 47, step: 1 },
+    ] },
+  { id: "model3d", group: "3D", glyph: "◆", title: "3D model", desc: "Photo of an object to 3D", pick: "engine",
+    fields: [
+      { type: "chips", name: "engine", label: "Engine", options: [["trellis_3d", "TRELLIS.2"], ["hunyuan_3d", "Hunyuan3D 2.1"]] },
+      { type: "image", name: "image", label: "Object photo", keepPng: true },
+      { type: "chips", name: "detail", label: "Detail", options: [["low", "Low-poly"], ["standard", "Standard"], ["high", "High"]], value: "standard" },
+      { type: "chips", name: "texture_size", label: "Texture", options: [["1024", "1K"], ["2048", "2K"]] },
+      { type: "check", name: "remove_background", label: "Remove background", value: true, when: f => f.engine === "trellis_3d" },
+    ], hint: "One object, fully visible, plain background works best." },
+  { id: "motion", group: "3D", glyph: "⟳", title: "3D motion", desc: "Text to body animation", tool: "hy_motion",
+    fields: [
+      { type: "text", name: "prompt", label: "Describe the movement", placeholder: "A person walks forward, stops, and waves with the right hand" },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 4, min: 1, max: 12, step: 0.5 },
+    ] },
+];
+const UI_BY_TOOL = {};
+for (const t of UI) for (const f of t.fields) if (f.name === t.pick) for (const [v] of f.options) UI_BY_TOOL[v] = t;
+for (const t of UI) if (t.tool) UI_BY_TOOL[t.tool] = t;
+
+// ------------------------------------------------------------------ navigation
+let current = null;     // tool UI currently open
+const values = {};      // field values per tool id
+const files = {};       // picked File objects per tool id
+function show(view, title) {
+  for (const s of $$("main > section")) s.hidden = s.id !== `v-${view}`;
+  $$("#nav button").forEach(b => b.classList.toggle("on", b.dataset.view === view || (view === "tool" && b.dataset.view === "home")));
+  $("#back").hidden = view !== "tool";
+  $("#title").textContent = title || { home: "AI Studio", gallery: "Results", settings: "Settings", lock: "AI Studio", setup: "AI Studio" }[view] || "AI Studio";
+  $("#nav").hidden = view === "lock" || view === "setup";
+  if (view === "gallery") renderGallery();
+  if (view === "settings") renderSettings();
+  window.scrollTo(0, 0);
+}
+$$("#nav button").forEach(b => b.onclick = () => { current = null; show(b.dataset.view); });
+$("#back").onclick = () => { current = null; show("home"); };
+
+function renderHome() {
+  const groups = [...new Set(UI.map(t => t.group))];
+  $("#v-home").innerHTML = groups.map(g => `<div class="group"><h2>${g}</h2><div class="tiles">${
+    UI.filter(t => t.group === g).map(t => `<button class="tile" type="button" data-tool="${t.id}"><i>${t.glyph}</i><b>${t.title}</b><span>${t.desc}</span></button>`).join("")
+  }</div></div>`).join("");
+  $$("#v-home .tile").forEach(b => b.onclick = () => openTool(b.dataset.tool));
+}
+
+// ------------------------------------------------------------------ tool form
+function fieldValue(t, f) {
+  const v = values[t.id] ??= {};
+  if (!(f.name in v)) v[f.name] = f.type === "chips" ? (f.value ?? f.options[0][0]) : (f.value ?? "");
+  return v[f.name];
+}
+function openTool(id, keepResult) {
+  current = UI.find(t => t.id === id);
+  show("tool", current.title);
+  renderForm();
+  if (!keepResult) {
+    const job = pendingJobs().find(j => UI_BY_TOOL[j.tool] === current);
+    if (job) watchJob(job); else $("#tool-result").hidden = true;
+  }
+}
+function renderForm() {
+  const t = current, form = $("#tool-form"), v = values[t.id] ??= {};
+  t.fields.forEach(f => fieldValue(t, f));
+  form.innerHTML = t.fields.map(f => {
+    if (f.when && !f.when(v)) return "";
+    const id = `f-${t.id}-${f.name}`;
+    if (f.type === "chips") return `<label class="lbl">${f.label}</label><div class="chips" data-name="${f.name}">${
+      f.options.map(([val, lab]) => `<button type="button" data-v="${val}" class="${String(v[f.name]) === String(val) ? "on" : ""}">${lab}</button>`).join("")}</div>`;
+    if (f.type === "text") return `<label class="lbl" for="${id}">${f.label}</label><textarea id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}">${esc(v[f.name])}</textarea>`;
+    if (f.type === "line") return `<label class="lbl" for="${id}">${f.label}</label><input type="text" id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}" value="${esc(v[f.name])}">`;
+    if (f.type === "number") return `<label class="lbl" for="${id}">${f.label}</label><input type="number" inputmode="decimal" id="${id}" data-name="${f.name}" min="${f.min}" max="${f.max}" step="${f.step}" value="${esc(v[f.name])}">`;
+    if (f.type === "check") return `<label class="check"><input type="checkbox" data-name="${f.name}" ${v[f.name] ? "checked" : ""}> ${f.label}</label>`;
+    const accept = { image: "image/*", video: "video/*", audio: "audio/*", media: "image/*,video/*" }[f.type];
+    return `<label class="lbl">${f.label}</label><button type="button" class="pick" data-file="${f.name}" data-accept="${accept}">Tap to choose</button>`;
+  }).join("") + `<button class="go" type="submit">${t.title === "Create image" ? "Create" : "Start"}</button>`
+    + (t.hint ? `<p class="hint">${t.hint}</p>` : "");
+  // restore picked files
+  for (const pick of $$("[data-file]", form)) { const fobj = files[t.id]?.[pick.dataset.file]; if (fobj) showPicked(pick, fobj); }
+  for (const box of $$(".chips", form)) box.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    v[box.dataset.name] = b.dataset.v; renderForm();
+  };
+  for (const el of $$("textarea, input[data-name]", form)) el.oninput = () => {
+    v[el.dataset.name] = el.type === "checkbox" ? el.checked : el.value;
+  };
+  for (const el of $$("input[type=checkbox]", form)) el.onchange = () => { v[el.dataset.name] = el.checked; };
+  for (const pick of $$("[data-file]", form)) pick.onclick = e => {
+    if (e.target.closest("audio, video")) return;
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: pick.dataset.accept });
+    input.onchange = () => { const f = input.files[0]; if (!f) return; (files[t.id] ??= {})[pick.dataset.file] = f; showPicked(pick, f); };
+    input.click();
+  };
+  form.onsubmit = e => { e.preventDefault(); submit(); };
+}
+function showPicked(pick, f) {
+  const url = URL.createObjectURL(f), kind = f.type.split("/")[0];
+  pick.classList.add("has");
+  pick.innerHTML = kind === "video" ? `<video src="${url}" muted playsinline loop autoplay></video>`
+    : kind === "audio" ? `<audio controls src="${url}"></audio>` : `<img src="${url}" alt="">`;
+}
+
+// ------------------------------------------------------------------ preparing inputs on the phone
+const readDataUrl = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+const extOf = f => ((f.name || "").match(/\.[a-z0-9]+$/i)?.[0] || ({ "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+  "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a" }[f.type] || "")).toLowerCase();
+function readImage(file, maxSide = 1536, png = false) {  // shrink phone photos before upload
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      res(png || file.type === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.92));
+    };
+    img.onerror = () => rej(new Error("This picture can't be read. Try a JPG or PNG."));
+    img.src = URL.createObjectURL(file);
+  });
+}
+// Re-record a clip at 16 fps (what Wan Animate expects), in real time.
+async function resampleVideo(file, { fps = 16, maxSide = 832, maxSeconds = 8, onProgress } = {}) {
+  const v = Object.assign(document.createElement("video"), { muted: true, playsInline: true, src: URL.createObjectURL(file) });
+  v.setAttribute("playsinline", "");
+  await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error("This video can't be read on this phone. Try an .mp4.")); });
+  const s = Math.min(1, maxSide / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement("canvas");
+  c.width = Math.round(v.videoWidth * s / 2) * 2; c.height = Math.round(v.videoHeight * s / 2) * 2;
+  const ctx = c.getContext("2d");
+  const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find(t => window.MediaRecorder?.isTypeSupported?.(t));
+  if (!type || !c.captureStream) throw new Error("This browser can't convert video. Try Chrome.");
+  const rec = new MediaRecorder(c.captureStream(fps), { mimeType: type, videoBitsPerSecond: 4e6 });
+  const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const stopped = new Promise(res => rec.onstop = res);
+  const end = Math.min(v.duration || maxSeconds, maxSeconds);
+  rec.start(); await v.play();
+  await new Promise(res => {
+    const timer = setInterval(() => {
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+      onProgress?.(Math.min(1, v.currentTime / end));
+      if (v.ended || v.currentTime >= end) { clearInterval(timer); res(); }
+    }, 1000 / fps);
+  });
+  v.pause(); rec.stop(); await stopped;
+  const mime = type.split(";")[0];
+  return { dataUrl: await readDataUrl(new Blob(chunks, { type: mime })), ext: mime === "video/mp4" ? ".mp4" : ".webm" };
+}
+
+async function buildParams(t, btn) {
+  const v = values[t.id], f = files[t.id] || {};
+  const p = { prompt: (v.prompt || "").trim() };
+  for (const k of ["seconds", "speed", "voice_text", "detail", "texture_size", "resolution"]) if (v[k] !== undefined && v[k] !== "") p[k] = v[k];
+  if ("turbo" in v) p.turbo = !!v.turbo;
+  if ("remove_background" in v) p.remove_background = !!v.remove_background;
+  if (v.size) [p.width, p.height] = v.size.split("x").map(Number);
+  const tool = t.tool || v[t.pick];
+  const need = (cond, msg) => { if (!cond) throw new InputError(msg); };
+  if (t.fields.some(x => x.name === "prompt" && !x.optional)) need(p.prompt, tool === "f5_voice" ? "Please type the text to speak." : "Please write a description first.");
+  if (t.fields.some(x => x.type === "image")) {
+    need(f.image, "Please choose a picture first.");
+    p.image = await readImage(f.image, 1536, t.fields.find(x => x.type === "image").keepPng);
+  }
+  if (tool === "wan_animate") {
+    need(f.video, "Please choose a movement video.");
+    const r = await resampleVideo(f.video, { maxSeconds: Number(p.seconds || 5) + 0.5, onProgress: x => btn.textContent = `Preparing video… ${Math.round(x * 100)}%` });
+    p.video = r.dataUrl; p.video_ext = r.ext;
+  }
+  if (tool === "seedvr2_upscale") {
+    need(f.media, "Please choose a photo or video.");
+    p.kind = f.media.type.startsWith("video") ? "video" : "image";
+    if (p.kind === "video") { need(f.media.size < 7 * 1048576, "Please use a video under 7 MB (a few seconds)."); p.media = await readDataUrl(f.media); p.media_ext = extOf(f.media) || ".mp4"; }
+    else p.media = await readImage(f.media, 2048);
+  }
+  if (tool === "f5_voice") {
+    if (v.voice === "custom") {
+      need(f.voice_audio, "Please choose your voice recording.");
+      need((v.voice_text || "").trim(), "Please type the exact words in your recording.");
+      p.voice_audio = await readDataUrl(f.voice_audio); p.voice_ext = extOf(f.voice_audio) || ".wav";
+    } else {
+      p.voice_audio = await readDataUrl(await (await fetch(`voices/${v.voice}.wav`)).blob());
+      p.voice_text = (await (await fetch(`voices/${v.voice}.txt`)).text()).trim();
+      p.voice_ext = ".wav";
+    }
+  }
+  return [tool, p];
+}
+
+// ------------------------------------------------------------------ jobs
+const pendingJobs = () => store.get("jobs", []);
+const setJobs = j => { store.set("jobs", j); updateBadge(); };
+const watching = new Set();
+function updateBadge() { const n = pendingJobs().length, b = $("#busy-badge"); b.hidden = !n; b.textContent = n; }
+
+async function submit() {
+  const t = current, btn = $("#tool-form .go"), label = btn.textContent;
+  btn.disabled = true;
+  try {
+    const [tool, p] = await buildParams(t, btn);
+    btn.textContent = "Sending…";
+    const [wf, uploads] = TOOLS[tool](p);
+    const input = { workflow: wf }; if (uploads.length) input.images = uploads;
+    const size = JSON.stringify(input).length;
+    if (size > 9.5e6) throw new InputError("These files are too big to send (RunPod accepts about 10 MB). Use a shorter or smaller file.");
+    const res = await runpod("POST", "run", { input });
+    const job = { id: res.id, tool, prompt: p.prompt, started: Date.now() };
+    setJobs([...pendingJobs(), job]);
+    watchJob(job);
+  } catch (e) {
+    $("#tool-result").hidden = false;
+    $("#tool-stage").innerHTML = `<div class="empty">Not started</div>`;
+    $("#tool-status").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
+    $("#tool-actions").innerHTML = "";
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
+
+const visibleFor = job => current && UI_BY_TOOL[job.tool] === current;
+function paint(job, html, status, actions) {
+  if (!visibleFor(job)) return;
+  $("#tool-result").hidden = false;
+  if (html !== null) $("#tool-stage").innerHTML = html;
+  $("#tool-status").innerHTML = status;
+  if (actions !== undefined) { $("#tool-actions").innerHTML = ""; actions.forEach(a => $("#tool-actions").append(a)); }
+}
+function button(text, fn, cls = "btn") { const b = Object.assign(document.createElement("button"), { type: "button", className: cls, textContent: text }); b.onclick = fn; return b; }
+
+async function watchJob(job) {
+  const cancel = button("Cancel", async () => { try { await runpod("POST", `cancel/${job.id}`); } catch {} });
+  paint(job, `<div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Working…</div>`, `<span class="spin"></span><span>Sending…</span>`, [cancel]);
+  if (watching.has(job.id)) return;
+  watching.add(job.id);
+  try {
+    while (true) {
+      await new Promise(r => setTimeout(r, 4000));
+      let s;
+      try { s = await runpod("GET", `status/${job.id}`); } catch (e) {
+        if (/key/.test(e.message)) throw e;
+        continue;  // network hiccup: ask again
+      }
+      const secs = Math.round((Date.now() - job.started) / 1000), clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+      if (s.status === "IN_QUEUE") paint(job, null, `<span class="spin"></span><span>Waking up the GPU… ${clock}</span>`);
+      else if (s.status === "IN_PROGRESS") paint(job, null, `<span class="spin"></span><span>Generating… ${clock}</span>`);
+      else if (s.status === "COMPLETED") {
+        const item = await storeResult(job, s);
+        setJobs(pendingJobs().filter(j => j.id !== job.id));
+        if (!item.files.length) throw new Error(s.output?.error || "The job finished but returned no files.");
+        const cost = ((s.executionTime || 0) / 1000 * 1.22 / 3600).toFixed(3);
+        if (visibleFor(job)) {
+          renderMedia($("#tool-stage"), item.files[0]);
+          paint(job, null, `<span>Done in ${clock} · about $${cost}</span>`, itemActions(item));
+        }
+        break;
+      } else if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(s.status) || s.error) {
+        setJobs(pendingJobs().filter(j => j.id !== job.id));
+        throw new Error(s.status === "CANCELLED" ? "Cancelled." : String(s.error || s.status).slice(0, 500));
+      }
+    }
+  } catch (e) {
+    paint(job, `<div class="empty">Something went wrong.</div>`, `<span class="err">${esc(e.message || e)}</span>`, []);
+  } finally { watching.delete(job.id); }
+}
+
+async function storeResult(job, s) {
+  const out = s.output || {}, list = [];
+  for (const it of out.images || []) {
+    if (it.type !== "base64" || (it.filename || "").startsWith("input_")) continue;
+    const ext = ((it.filename || "").match(/\.[a-z0-9]+$/i)?.[0] || ".png").toLowerCase();
+    const type = { ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm",
+      ".glb": "model/gltf-binary", ".flac": "audio/flac", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".json": "application/json" }[ext] || "application/octet-stream";
+    const bytes = unb64(it.data);
+    list.push({ name: `${job.tool}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}_${list.length}${ext}`, ext, blob: new Blob([bytes], { type }) });
+  }
+  const item = { id: job.id, tool: job.tool, prompt: job.prompt, created: Date.now(), files: list };
+  if (list.length) await saveItem(item);
+  return item;
+}
+
+// ------------------------------------------------------------------ showing results
+function loadModelViewer() {
+  if ($("#mv-script")) return;
+  document.head.append(Object.assign(document.createElement("script"), {
+    id: "mv-script", type: "module", src: "https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js" }));
+}
+function renderMedia(stage, file, tool) {
+  const url = URL.createObjectURL(file.blob);
+  if (file.ext === ".glb") { loadModelViewer(); stage.innerHTML = `<model-viewer src="${url}" camera-controls auto-rotate touch-action="pan-y" shadow-intensity="1"></model-viewer>`; }
+  else if (file.ext === ".json") showMotion(stage, file.blob);
+  else if (/\.(flac|wav|mp3)$/.test(file.ext)) stage.innerHTML = `<audio controls src="${url}"></audio>`;
+  else if (/\.(mp4|webm)$/.test(file.ext)) stage.innerHTML = `<video controls playsinline loop autoplay src="${url}"></video>`;
+  else stage.innerHTML = `<img src="${url}" alt="result">`;
+}
+function showMotion(stage, blob) {
+  stage.innerHTML = `<iframe src="hymotion/viewer.html" title="Motion viewer"></iframe>`;
+  const frame = $("iframe", stage);
+  const onReady = async e => {
+    if (e.source !== frame.contentWindow || e.data?.type !== "VIEWER_READY") return;
+    removeEventListener("message", onReady);
+    frame.contentWindow.postMessage({ type: "LOAD_MOTION", motionData: JSON.parse(await blob.text()) }, location.origin);
+  };
+  addEventListener("message", onReady);
+}
+async function saveFile(file) {
+  const f = new File([file.blob], file.name, { type: file.blob.type });
+  if (navigator.canShare?.({ files: [f] })) { try { await navigator.share({ files: [f] }); return; } catch (e) { if (e.name === "AbortError") return; } }
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(f), download: file.name });
+  document.body.append(a); a.click(); a.remove();
+}
+function itemActions(item) {
+  const f = item.files[0], acts = [button("Save / Share", () => saveFile(f), "btn")];
+  const isImg = /\.(png|jpg|jpeg|webp)$/.test(f.ext), isVid = /\.(mp4|webm)$/.test(f.ext);
+  const use = (toolId, field) => button({ edit: "Edit", i2v: "Animate", model3d: "Make 3D", upscale: "Upscale" }[toolId], () => {
+    closeViewer();
+    (files[toolId] ??= {})[field] = new File([f.blob], f.name, { type: f.blob.type });
+    openTool(toolId, true); $("#tool-result").hidden = true;
+  });
+  if (isImg) acts.push(use("edit", "image"), use("i2v", "image"), use("model3d", "image"));
+  if ((isImg || isVid) && item.tool !== "seedvr2_upscale" && item.tool !== "stable_audio") acts.push(use("upscale", "media"));
+  return acts;
+}
+
+async function renderGallery() {
+  const grid = $("#gallery");
+  const pend = pendingJobs();
+  const items = (await allItems().catch(() => [])).sort((a, b) => b.created - a.created);
+  if (!items.length && !pend.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`; return; }
+  grid.innerHTML = "";
+  for (const j of pend) {
+    const b = button("", () => openTool(UI_BY_TOOL[j.tool].id), "thumb");
+    b.innerHTML = `<div class="glyph"><div class="spin"></div></div><span class="kind">${esc(UI_BY_TOOL[j.tool]?.title || j.tool)}</span>`;
+    grid.append(b);
+  }
+  for (const it of items) {
+    const f = it.files[0], url = URL.createObjectURL(f.blob), b = button("", () => openViewer(it), "thumb");
+    const kind = UI_BY_TOOL[it.tool]?.title || it.tool;
+    b.innerHTML = /\.(png|jpg|jpeg|webp)$/.test(f.ext) ? `<img src="${url}" alt="" loading="lazy">`
+      : /\.(mp4|webm)$/.test(f.ext) && it.tool !== "stable_audio" ? `<video src="${url}#t=0.5" muted playsinline preload="metadata"></video><span class="kind">video</span>`
+      : `<div class="glyph">${UI_BY_TOOL[it.tool]?.glyph || "•"}</div><span class="kind">${esc(kind)}</span>`;
+    grid.append(b);
+  }
+}
+function openViewer(item) {
+  $("#viewer").hidden = false;
+  $("#viewer-title").textContent = UI_BY_TOOL[item.tool]?.title || item.tool;
+  $("#viewer-prompt").textContent = item.prompt || "";
+  renderMedia($("#viewer-stage"), item.files[0], item.tool);
+  const acts = itemActions(item);
+  acts.push(button("Delete", async () => { await deleteItem(item.id); closeViewer(); renderGallery(); }, "btn danger"));
+  $("#viewer-actions").innerHTML = ""; acts.forEach(a => $("#viewer-actions").append(a));
+}
+function closeViewer() { $("#viewer").hidden = true; $("#viewer-stage").innerHTML = ""; }
+$("#viewer-close").onclick = closeViewer;
+
+// ------------------------------------------------------------------ GPU status + keep warm
+let health = null;
+async function refreshGpu() {
+  const chip = $("#gpu"), dot = $(".dot", chip), text = $("span:last-child", chip);
+  if (!API_KEY) return;
+  try {
+    health = await runpod("GET", "health");
+    const w = health.workers || {}, j = health.jobs || {};
+    const up = (w.idle || 0) + (w.running || 0) + (w.ready || 0);
+    if ((j.inProgress || 0) + (j.inQueue || 0) && up) { dot.className = "dot warn"; text.textContent = "GPU busy"; }
+    else if (up) { dot.className = "dot ok"; text.textContent = "GPU ready"; }
+    else if (w.initializing) { dot.className = "dot warn"; text.textContent = "GPU waking"; }
+    else { dot.className = "dot"; text.textContent = "GPU asleep"; }
+  } catch { dot.className = "dot bad"; text.textContent = "Offline"; }
+  chip.classList.toggle("warm", !!store.get("warm"));
+}
+let lastPing = 0;
+async function keepWarm(force) {
+  if (!API_KEY || !store.get("warm") || document.hidden) return;
+  if (!force && Date.now() - lastPing < 8 * 60 * 1000) return;
+  if (pendingJobs().length && !force) return;  // a real job keeps it awake anyway
+  lastPing = Date.now();
+  try { const [wf] = TOOLS.wake_up(); await runpod("POST", "run", { input: { workflow: wf } }); } catch {}
+}
+$("#gpu").onclick = () => { current = null; show("settings"); };
+function renderSettings() {
+  $("#warm").checked = !!store.get("warm");
+  const w = health?.workers || {};
+  $("#gpu-detail").textContent = !health ? "Checking…" : ((w.idle || 0) + (w.running || 0) + (w.ready || 0))
+    ? "The GPU is awake. New jobs start in seconds." : "The GPU is asleep (costs nothing). The first job wakes it, which takes a few minutes.";
+  allItems().then(items => { $("#storage-info").textContent = `${items.length} result${items.length === 1 ? "" : "s"} saved on this phone.`; }).catch(() => {});
+}
+$("#warm").onchange = e => { store.set("warm", e.target.checked); if (e.target.checked) keepWarm(true); refreshGpu(); };
+$("#lock-now").onclick = () => { API_KEY = null; try { sessionStorage.removeItem("k"); } catch {} ; start(); };
+$("#forget").onclick = () => {
+  if ($("#forget").dataset.sure !== "1") { $("#forget").dataset.sure = "1"; $("#forget").textContent = "Tap again to remove the key"; return; }
+  store.del("vault"); API_KEY = null; try { sessionStorage.removeItem("k"); } catch {}; start();
+};
+$("#clear-gallery").onclick = async () => {
+  const b = $("#clear-gallery");
+  if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Tap again to delete everything"; return; }
+  for (const it of await allItems()) await deleteItem(it.id);
+  b.dataset.sure = ""; b.textContent = "Delete all saved results"; renderSettings();
+};
+
+// ------------------------------------------------------------------ start-up
+$("#setup-go").onclick = async () => {
+  const key = $("#setup-key").value.trim(), pin = $("#setup-pin").value.trim(), ep = $("#setup-endpoint").value.trim();
+  const msg = $("#setup-msg");
+  if (!key) { msg.textContent = "Please paste your RunPod API key."; return; }
+  if (!/^\d{4,12}$/.test(pin)) { msg.textContent = "The PIN must be 4 to 12 digits."; return; }
+  msg.textContent = "Checking the key…";
+  store.set("endpoint", ep || "5mginm1hj3ns0n");
+  API_KEY = key;
+  try { await runpod("GET", "health"); } catch (e) { API_KEY = null; msg.textContent = e.message; return; }
+  await saveKey(key, pin);
+  $("#setup-key").value = ""; $("#setup-pin").value = "";
+  remember(key); start();
+};
+async function unlock() {
+  const pin = $("#unlock-pin").value.trim();
+  try { remember(await openKey(pin)); $("#unlock-pin").value = ""; start(); }
+  catch { $("#unlock-msg").textContent = "That PIN is not right."; $("#unlock-pin").select(); }
+}
+$("#unlock-go").onclick = unlock;
+$("#unlock-pin").onkeydown = e => { if (e.key === "Enter") unlock(); };
+
+let timers = false;
+function start() {
+  if (!API_KEY) { try { API_KEY = sessionStorage.getItem("k"); } catch {} }
+  if (!store.get("vault")) { show("setup"); return; }
+  if (!API_KEY) { show("lock"); setTimeout(() => $("#unlock-pin").focus(), 50); return; }
+  renderHome(); show("home"); updateBadge(); refreshGpu();
+  for (const job of pendingJobs()) watchJob(job);  // pick up jobs from before a reload
+  if (!timers) {
+    timers = true;
+    setInterval(refreshGpu, 20000);
+    setInterval(() => keepWarm(false), 60000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshGpu(); keepWarm(false); } });
+  }
+  keepWarm(false);
+}
+start();
+</script>
+</body>
+</html>
