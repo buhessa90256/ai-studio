@@ -315,6 +315,12 @@ function minimax_h3(p) {
     wf["6"] = { class_type: "LoadImage", inputs: { image: name } };
     wf["7"].inputs.first_frame = ["6", 0];
   }
+  if (p.last_image) {  // end on this frame (same as the first one = seamless loop)
+    const [name, more] = upload(p, "last_image", ".png", "a last frame");
+    uploads = uploads.concat(more);
+    wf["6b"] = { class_type: "LoadImage", inputs: { image: name } };
+    wf["7"].inputs.last_frame = ["6b", 0];
+  }
   return [wf, uploads];
 }
 

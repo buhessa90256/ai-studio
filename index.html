@@ -141,26 +141,24 @@
 </header>
 
 <main>
-  <!-- Lock screen: the RunPod key is stored on this phone, encrypted with a PIN -->
+  <!-- One-time unlock for phones set up with the old PIN lock: after this the key is kept without a PIN -->
   <section id="v-lock" hidden>
     <div class="card">
-      <h2 style="margin:0 0 4px;font-size:18px">Unlock AI Studio</h2>
-      <p class="sub">Enter your PIN to use your RunPod key on this phone.</p>
+      <h2 style="margin:0 0 4px;font-size:18px">Enter your PIN one last time</h2>
+      <p class="sub">AI Studio no longer uses a PIN. Enter it once more and the app will open straight away from now on.</p>
       <input id="unlock-pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="PIN">
       <button class="go" id="unlock-go" type="button">Unlock</button>
       <p class="hint" id="unlock-msg"></p>
     </div>
   </section>
 
-  <!-- First run: save key + PIN -->
+  <!-- First run: save the key -->
   <section id="v-setup" hidden>
     <div class="card">
       <h2 style="margin:0 0 4px;font-size:18px">Set up AI Studio</h2>
-      <p class="sub">Your RunPod API key is saved only on this phone, locked with a PIN. It is never part of the website.</p>
+      <p class="sub">Your RunPod API key is saved only on this phone. It is never part of the website.</p>
       <label class="lbl" for="setup-key">RunPod API key</label>
       <input id="setup-key" type="password" autocomplete="off" placeholder="rpa_…">
-      <label class="lbl" for="setup-pin">Choose a PIN (4–12 digits)</label>
-      <input id="setup-pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12">
       <label class="lbl" for="setup-endpoint">Endpoint ID</label>
       <input id="setup-endpoint" type="text" value="5mginm1hj3ns0n" autocomplete="off">
       <button class="go" id="setup-go" type="button">Save and start</button>
@@ -197,9 +195,8 @@
     </div>
     <div class="card">
       <h2 style="margin:0 0 6px;font-size:16px">Security</h2>
-      <p class="sub">Your key is stored on this phone only, encrypted with your PIN.</p>
+      <p class="sub">Your key is stored on this phone only. Anyone who can open this phone's browser can use it.</p>
       <div class="row">
-        <button class="btn" type="button" id="lock-now">Lock now</button>
         <button class="btn danger" type="button" id="forget">Remove key from phone</button>
       </div>
     </div>
@@ -243,7 +240,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 
-// ------------------------------------------------------------------ key + PIN (WebCrypto)
+// ------------------------------------------------------------------ key (saved on this phone; older versions locked it with a PIN)
 let API_KEY = null;
 const ENDPOINT = () => store.get("endpoint", "5mginm1hj3ns0n");
 const enc = new TextEncoder(), dec = new TextDecoder();
@@ -254,19 +251,15 @@ async function pinKey(pin, salt) {
   return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 250000, hash: "SHA-256" },
     base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
-async function saveKey(key, pin) {
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await pinKey(pin, salt), enc.encode(key));
-  store.set("vault", { salt: b64(salt), iv: b64(iv), ct: b64(ct) });
-}
 async function openKey(pin) {
   const v = store.get("vault");
   const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(v.iv) }, await pinKey(pin, unb64(v.salt)), unb64(v.ct));
   return dec.decode(pt);
 }
-function remember(key) {  // stays unlocked until the browser tab is closed
+function remember(key) {  // kept on this phone, no PIN
   API_KEY = key;
-  try { sessionStorage.setItem("k", key); } catch {}
+  store.set("apikey", key);
+  store.del("vault");
 }
 
 // ------------------------------------------------------------------ RunPod
@@ -872,10 +865,9 @@ function renderSettings() {
   allItems().then(items => { $("#storage-info").textContent = `${items.length} result${items.length === 1 ? "" : "s"} saved on this phone.`; }).catch(() => {});
 }
 $("#warm").onchange = e => { store.set("warm", e.target.checked); if (e.target.checked) keepWarm(true); refreshGpu(); };
-$("#lock-now").onclick = () => { API_KEY = null; try { sessionStorage.removeItem("k"); } catch {} ; start(); };
 $("#forget").onclick = () => {
   if ($("#forget").dataset.sure !== "1") { $("#forget").dataset.sure = "1"; $("#forget").textContent = "Tap again to remove the key"; return; }
-  store.del("vault"); API_KEY = null; try { sessionStorage.removeItem("k"); } catch {}; start();
+  store.del("vault"); store.del("apikey"); API_KEY = null; start();
 };
 $("#clear-gallery").onclick = async () => {
   const b = $("#clear-gallery");
@@ -886,16 +878,14 @@ $("#clear-gallery").onclick = async () => {
 
 // ------------------------------------------------------------------ start-up
 $("#setup-go").onclick = async () => {
-  const key = $("#setup-key").value.trim(), pin = $("#setup-pin").value.trim(), ep = $("#setup-endpoint").value.trim();
+  const key = $("#setup-key").value.trim(), ep = $("#setup-endpoint").value.trim();
   const msg = $("#setup-msg");
   if (!key) { msg.textContent = "Please paste your RunPod API key."; return; }
-  if (!/^\d{4,12}$/.test(pin)) { msg.textContent = "The PIN must be 4 to 12 digits."; return; }
   msg.textContent = "Checking the key…";
   store.set("endpoint", ep || "5mginm1hj3ns0n");
   API_KEY = key;
   try { await runpod("GET", "health"); } catch (e) { API_KEY = null; msg.textContent = e.message; return; }
-  await saveKey(key, pin);
-  $("#setup-key").value = ""; $("#setup-pin").value = "";
+  $("#setup-key").value = "";
   remember(key); start();
 };
 async function unlock() {
@@ -908,9 +898,9 @@ $("#unlock-pin").onkeydown = e => { if (e.key === "Enter") unlock(); };
 
 let timers = false;
 function start() {
-  if (!API_KEY) { try { API_KEY = sessionStorage.getItem("k"); } catch {} }
-  if (!store.get("vault")) { show("setup"); return; }
-  if (!API_KEY) { show("lock"); setTimeout(() => $("#unlock-pin").focus(), 50); return; }
+  if (!API_KEY) API_KEY = store.get("apikey");
+  if (!API_KEY && store.get("vault")) { show("lock"); setTimeout(() => $("#unlock-pin").focus(), 50); return; }
+  if (!API_KEY) { show("setup"); return; }
   renderHome(); show("home"); updateBadge(); refreshGpu();
   for (const job of pendingJobs()) watchJob(job);  // pick up jobs from before a reload
   if (!timers) {
