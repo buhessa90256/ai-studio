@@ -37,6 +37,11 @@ const H3_AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors";
 const H3_LORA = { 4: "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
   8: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors" };
 
+const TALK_UNET = "wan2.1_i2v_480p_14B_fp8_scaled.safetensors";
+const TALK_PATCH = "wan2.1_infiniteTalk_single_fp16.safetensors";
+const TALK_AUDIO_ENCODER = "wav2vec2-chinese-base_fp16.safetensors";
+const TALK_LORA = "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors";
+
 const LTX_CKPT = "ltx-2-19b-distilled-fp8.safetensors";
 const LTX_GEMMA = "gemma_3_12B_it_fp4_mixed.safetensors";
 const LTX_UPSCALER = "ltx-2-spatial-upscaler-x2-1.0.safetensors";
@@ -313,6 +318,86 @@ function minimax_h3(p) {
   return [wf, uploads];
 }
 
+function talking_avatar(p) {
+  const [img, up1] = upload(p, "image", ".png", "a photo of the person");
+  const [aud, up2] = upload(p, "audio", p.audio_ext || ".wav", "the speech audio");
+  const w = roundTo(p.width ?? 832, 16, 256, 1280), h = roundTo(p.height ?? 480, 16, 256, 1280);
+  const seconds = Math.max(1, Math.min(20, num(p.audio_seconds, 5) || 5));
+  const frames = Math.ceil(seconds * 25) + 1;
+  const chunks = 1 + Math.max(0, Math.ceil((frames - 81) / 72));
+  const seed = seedOf(p) % MAX31;
+  const wf = {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: TALK_UNET, weight_dtype: "default" } },
+    "2": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: TALK_LORA, strength_model: 1.0 } },
+    "3": { class_type: "CLIPLoader", inputs: { clip_name: WAN_CLIP, type: "wan", device: "default" } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["3", 0], text: p.prompt || "A person talking naturally to the camera." } },
+    "5": { class_type: "ConditioningZeroOut", inputs: { conditioning: ["4", 0] } },
+    "6": { class_type: "VAELoader", inputs: { vae_name: WAN_VAE } },
+    "7": { class_type: "ModelPatchLoader", inputs: { name: TALK_PATCH } },
+    "8": { class_type: "AudioEncoderLoader", inputs: { audio_encoder_name: TALK_AUDIO_ENCODER } },
+    "9": { class_type: "LoadAudio", inputs: { audio: aud } },
+    "10": { class_type: "AudioEncoderEncode", inputs: { audio_encoder: ["8", 0], audio: ["9", 0] } },
+    "11": { class_type: "LoadImage", inputs: { image: img } },
+    "12": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+  };
+  let video = null;
+  for (let k = 0; k < chunks; k++) {
+    const b = 100 + k * 10, id = n => String(b + n);
+    const talk = { mode: "single_speaker", model: ["2", 0], model_patch: ["7", 0], positive: ["4", 0], negative: ["5", 0],
+      vae: ["6", 0], width: w, height: h, length: 81, start_image: ["11", 0], audio_encoder_output_1: ["10", 0],
+      motion_frame_count: 9, audio_scale: 1.0 };
+    if (video) talk.previous_frames = video;
+    wf[id(0)] = { class_type: "WanInfiniteTalkToVideo", inputs: talk };
+    wf[id(1)] = { class_type: "RandomNoise", inputs: { noise_seed: seed + k } };
+    wf[id(2)] = { class_type: "BasicScheduler", inputs: { model: [id(0), 0], scheduler: "normal", steps: 6, denoise: 1.0 } };
+    wf[id(3)] = { class_type: "CFGGuider", inputs: { model: [id(0), 0], positive: [id(0), 1], negative: [id(0), 2], cfg: 1.0 } };
+    wf[id(4)] = { class_type: "SamplerCustomAdvanced", inputs: {
+      noise: [id(1), 0], guider: [id(3), 0], sampler: ["12", 0], sigmas: [id(2), 0], latent_image: [id(0), 3] } };
+    wf[id(5)] = { class_type: "VAEDecode", inputs: { samples: [id(4), 0], vae: ["6", 0] } };
+    if (!video) video = [id(5), 0];
+    else {  // drop the 9 frames that repeat the end of the previous section, then append
+      wf[id(6)] = { class_type: "ImageFromBatch", inputs: { image: [id(5), 0], batch_index: 9, length: 4096 } };
+      wf[id(7)] = { class_type: "ImageBatch", inputs: { image1: video, image2: [id(6), 0] } };
+      video = [id(7), 0];
+    }
+  }
+  wf["90"] = { class_type: "ImageFromBatch", inputs: { image: video, batch_index: 0, length: frames } };
+  wf["91"] = { class_type: "CreateVideo", inputs: { images: ["90", 0], audio: ["9", 0], fps: 25.0 } };
+  wf["92"] = { class_type: "SaveVideo", inputs: { video: ["91", 0], filename_prefix: "video/talking", format: "auto", codec: "auto" } };
+  return [wf, up1.concat(up2)];
+}
+
+function full_video(p) {
+  const [w, h] = { landscape: [1344, 768], portrait: [768, 1344], square: [1024, 1024] }[p.shape] || [1344, 768];
+  const seed = seedOf(p);
+  const [img] = qwen_image({ ...p, prompt: p.scene || p.prompt || "", width: w, height: h, turbo: true, seed });
+  const wf = {};
+  for (const [k, node] of Object.entries(img)) {
+    const inputs = {};
+    for (const [key, val] of Object.entries(node.inputs))
+      inputs[key] = Array.isArray(val) && val.length === 2 && typeof val[0] === "string" ? ["i" + val[0], val[1]] : val;
+    wf["i" + k] = { class_type: node.class_type, inputs };
+  }
+  delete wf.i9;  // the still is the first frame of the video
+  const [vid] = minimax_h3({ ...p, prompt: p.prompt || "", width: w, height: h, image: null, seed: seed + 1 });
+  Object.assign(wf, vid);
+  wf["7"].inputs.first_frame = ["i8", 0];
+  let uploads = [];
+  if ((p.voice_text || "").trim()) {
+    let ref;
+    [ref, uploads] = upload(p, "voice_audio", p.voice_ext || ".wav", "a reference voice");
+    wf["30"] = { class_type: "LoadAudio", inputs: { audio: ref } };
+    wf["31"] = { class_type: "F5TTSAudioInputs", inputs: {
+      sample_audio: ["30", 0], sample_text: p.voice_ref_text || "", speech: p.voice_text,
+      seed: seed % MAX31, model: "F5v1", vocoder: "auto", speed: 1.0, model_type: "F5TTS_v1_Base" } };
+    wf["32"] = { class_type: "AudioAdjustVolume", inputs: { audio: ["14", 0], volume: -10 } };
+    wf["33"] = { class_type: "AudioMerge", inputs: { audio1: ["32", 0], audio2: ["31", 0], merge_method: "add" } };
+    wf["15"].inputs.audio = ["33", 0];
+  }
+  wf["16"].inputs.filename_prefix = "video/full_video";
+  return [wf, uploads];
+}
+
 // ------------------------------------------------------------------ audio
 
 function stable_audio(p) {
@@ -493,5 +578,5 @@ function wake_up() {
 }
 
 // klein_*, ltx2_t2v and hunyuan_3d stay above for reference; their models were removed from the volume.
-const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_animate, minimax_h3,
+const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_animate, minimax_h3, talking_avatar, full_video,
   stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hy_motion, wake_up };

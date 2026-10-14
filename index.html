@@ -108,6 +108,8 @@
     padding: 2px 7px; border-radius: 999px; }
   .thumb .dl { position: absolute; right: 5px; top: 5px; width: 30px; height: 30px; border-radius: 8px; border: 0;
     background: rgba(0,0,0,.55); color: #fff; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .thumb .rm { right: auto; left: 5px; }
+  .thumb .rm.sure { width: auto; padding: 0 8px; font-size: 12px; background: var(--bad); }
   .thumb .glyph { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 30px; color: var(--accent); }
   .empty { color: var(--muted); text-align: center; padding: 32px 12px; font-size: 14px; }
 
@@ -329,6 +331,26 @@ const UI = [
       { type: "chips", name: "quality", label: "Quality", options: [["fast", "Fast"], ["high", "Best"]] },
       { type: "number", name: "seconds", label: "Length (seconds)", value: 5, min: 2, max: 15, step: 1 },
     ], hint: "Describe the sound too. The first run after a break loads a large model and takes several minutes." },
+  { id: "fullvideo", group: "Video", glyph: "★", title: "Full video", desc: "Shot + motion + sound + voice", tool: "full_video",
+    fields: [
+      { type: "text", name: "scene", label: "The opening shot", placeholder: "A cozy Italian café at golden hour, a barista behind a marble counter, cinematic photo" },
+      { type: "text", name: "prompt", label: "What happens, and what it sounds like", optional: true, placeholder: "The barista pours latte art and smiles. Audio: espresso hiss, café chatter, soft jazz." },
+      { type: "text", name: "voice_text", label: "Voiceover (optional)", optional: true, placeholder: "Every cup tells a story. Come taste ours." },
+      { type: "chips", name: "voice", label: "Voiceover voice", options: [["english", "Voice 1"], ["french", "Voice 2"], ["german", "Voice 3"]] },
+      { type: "chips", name: "shape", label: "Shape", options: [["landscape", "Landscape"], ["portrait", "Portrait"], ["square", "Square"]] },
+      { type: "chips", name: "quality", label: "Quality", options: [["fast", "Fast"], ["high", "Best"]] },
+      { type: "number", name: "seconds", label: "Length (seconds)", value: 6, min: 2, max: 15, step: 1 },
+    ], hint: "Runs three models in one job, so allow several minutes." },
+  { id: "avatar", group: "Video", glyph: "◐", title: "Talking avatar", desc: "A photo that speaks", tool: "talking_avatar",
+    fields: [
+      { type: "image", name: "image", label: "Photo of the person (face visible)" },
+      { type: "chips", name: "source", label: "What they say", options: [["text", "Type the words"], ["audio", "My audio"]] },
+      { type: "text", name: "speech", label: "Words to speak (up to about 20 seconds)", when: f => f.source !== "audio", placeholder: "Hi! I'm your AI presenter. Here are three quick tips." },
+      { type: "chips", name: "voice", label: "Voice", options: [["english", "Voice 1"], ["french", "Voice 2"], ["german", "Voice 3"]], when: f => f.source !== "audio" },
+      { type: "audio", name: "audio", label: "Speech recording (up to 20 s)", when: f => f.source === "audio" },
+      { type: "line", name: "prompt", label: "Scene description (optional)", optional: true, placeholder: "A woman talking to the camera in a bright studio" },
+      { type: "chips", name: "size", label: "Shape", options: SHAPES },
+    ], hint: "Only use photos and voices you have permission to use." },
   { id: "animate", group: "Video", glyph: "☺", title: "Character animation", desc: "Copy moves from a video", tool: "wan_animate",
     fields: [
       { type: "image", name: "image", label: "Character picture" },
@@ -450,7 +472,7 @@ function renderForm() {
 }
 
 // ------------------------------------------------------------------ prompt ideas (prompts.chat, CC0)
-const IDEA_KIND = { image: ["IMAGE", false], edit: ["IMAGE", true], i2v: ["VIDEO", true], t2v: ["VIDEO", false],
+const IDEA_KIND = { image: ["IMAGE", false], edit: ["IMAGE", true], i2v: ["VIDEO", true], t2v: ["VIDEO", false], fullvideo: ["VIDEO", false],
   animate: ["VIDEO", false], sfx: ["AUDIO", false] };
 let IDEAS = null;
 const fillTemplate = x => x.replace(/\$\{([^}:]+)(?::([^}]*))?\}/g, (m, name, def) => (def ?? name).trim());
@@ -563,6 +585,32 @@ async function buildParams(t, btn) {
     if (f.image) p.image = await readImage(f.image, 1536, imgField.keepPng);
   }
   if (v.quality) p.quality = v.quality;
+  if (tool === "full_video") {
+    p.scene = (v.scene || "").trim(); p.shape = v.shape;
+    need(p.scene, "Please describe the opening shot.");
+    if (!p.prompt) p.prompt = p.scene;
+    if ((v.voice_text || "").trim()) {
+      p.voice_audio = await readDataUrl(await (await fetch(`voices/${v.voice}.wav`)).blob());
+      p.voice_ref_text = (await (await fetch(`voices/${v.voice}.txt`)).text()).trim();
+      p.voice_ext = ".wav";
+    }
+  }
+  if (tool === "talking_avatar") {
+    if (!p.prompt) p.prompt = "A person talking naturally to the camera.";
+    let audio;
+    if (v.source === "audio") {
+      need(f.audio, "Please choose a speech recording.");
+      audio = f.audio; p.audio_ext = extOf(f.audio) || ".wav";
+    } else {
+      need((v.speech || "").trim(), "Please type what the person should say.");
+      audio = await makeSpeech(v.speech.trim(), v.voice, btn);
+      p.audio_ext = audio.ext;
+      audio = audio.blob;
+    }
+    p.audio_seconds = await audioSeconds(audio);
+    need(p.audio_seconds <= 20.5, `The speech is ${Math.round(p.audio_seconds)} seconds long; please keep it under 20 seconds.`);
+    p.audio = await readDataUrl(audio);
+  }
   if (tool === "wan_animate") {
     need(f.video, "Please choose a movement video.");
     const r = await resampleVideo(f.video, { maxSeconds: Number(p.seconds || 5) + 0.5, onProgress: x => btn.textContent = `Preparing video… ${Math.round(x * 100)}%` });
@@ -594,6 +642,31 @@ const setJobs = j => { store.set("jobs", j); updateBadge(); };
 const watching = new Set();
 function updateBadge() { const n = pendingJobs().length, b = $("#busy-badge"); b.hidden = !n; b.textContent = n; }
 
+async function audioSeconds(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  try { return (await ctx.decodeAudioData(await blob.arrayBuffer())).duration; } finally { ctx.close?.(); }
+}
+// Talking avatar step 1: turn typed words into speech with F5-TTS and wait for it here.
+async function makeSpeech(text, voice, btn) {
+  const [wf, uploads] = TOOLS.f5_voice({ prompt: text, speed: 1, voice_ext: ".wav",
+    voice_audio: await readDataUrl(await (await fetch(`voices/${voice}.wav`)).blob()),
+    voice_text: (await (await fetch(`voices/${voice}.txt`)).text()).trim() });
+  const res = await runpod("POST", "run", { input: { workflow: wf, images: uploads } });
+  const t0 = Date.now();
+  while (true) {
+    await new Promise(r => setTimeout(r, 4000));
+    let s; try { s = await runpod("GET", `status/${res.id}`); } catch { continue; }
+    const secs = Math.round((Date.now() - t0) / 1000);
+    btn.textContent = s.status === "IN_QUEUE" ? `Step 1 of 2: waking the GPU… ${secs}s` : `Step 1 of 2: making the voice… ${secs}s`;
+    if (s.status === "COMPLETED") {
+      const it = (s.output?.images || []).find(x => x.type === "base64" && /\.(flac|wav|mp3)$/i.test(x.filename || ""));
+      if (!it) throw new Error("The voice step returned no audio.");
+      const ext = it.filename.match(/\.[a-z0-9]+$/i)[0].toLowerCase();
+      return { blob: new Blob([unb64(it.data)], { type: ext === ".flac" ? "audio/flac" : "audio/wav" }), ext };
+    }
+    if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(s.status) || s.error) throw new Error(String(s.error || s.status).slice(0, 400));
+  }
+}
 async function submit() {
   const t = current, btn = $("#tool-form .go"), label = btn.textContent;
   btn.disabled = true;
@@ -742,6 +815,15 @@ async function renderGallery() {
     dl.setAttribute("role", "button"); dl.setAttribute("aria-label", "Save " + kind);
     dl.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.8 8 10.3l3.5-3.5M3 13.5h10"/></svg>`;
     b.append(dl);
+    const rm = Object.assign(document.createElement("span"), { className: "dl rm", tabIndex: 0 });
+    rm.setAttribute("role", "button"); rm.setAttribute("aria-label", "Delete " + kind);
+    rm.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></svg>`;
+    rm.onclick = async e => {
+      e.stopPropagation();
+      if (!rm.classList.contains("sure")) { rm.classList.add("sure"); rm.textContent = "Delete?"; return; }
+      await deleteItem(it.id); b.remove();
+    };
+    b.append(rm);
     grid.append(b);
   }
 }
