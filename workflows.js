@@ -583,6 +583,11 @@ function wake_up() {
   }, []];
 }
 
+// Get a finished job's files again from the copy the worker keeps for 3 days (RunPod forgets after 30 min).
+function fetch_result(params) {
+  return [{ "1": { class_type: "AIStudioFetchResult", inputs: { job_id: String(params.job_id || "") } } }, []];
+}
+
 // klein_*, ltx2_t2v and hunyuan_3d stay above for reference; their models were removed from the volume.
 const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_animate, minimax_h3, talking_avatar, full_video,
-  stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hy_motion, wake_up };
+  stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hy_motion, wake_up, fetch_result };

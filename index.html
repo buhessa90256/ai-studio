@@ -111,6 +111,11 @@
   .thumb .rm { right: auto; left: 5px; }
   .thumb .rm.sure { width: auto; padding: 0 8px; font-size: 12px; background: var(--bad); }
   .thumb .glyph { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 30px; color: var(--accent); }
+  .prog { width: 100%; }
+  .prog .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 2px 0 6px; }
+  .prog .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .8s ease; }
+  .prog .row2 { display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; color: var(--muted); }
+  .prog .row2 b { color: var(--ink, inherit); font-weight: 650; }
   .empty { color: var(--muted); text-align: center; padding: 32px 12px; font-size: 14px; }
 
   .sheet { position: fixed; inset: 0; z-index: 30; background: var(--bg); overflow-y: auto;
@@ -634,6 +639,42 @@ async function buildParams(t, btn) {
   return [tool, p];
 }
 
+// ------------------------------------------------------------------ time left (progress bar)
+// GPU seconds a job usually takes; replaced by what this phone actually measured for the same kind of job.
+const TYPICAL = { qwen_image: 90, qwen_edit: 60, wan_i2v: 160, minimax_h3: 350, full_video: 950, talking_avatar: 640, f5_voice: 40,
+  stable_audio: 60, seedvr2_upscale: 150, trellis_3d: 150, wan_animate: 600, hy_motion: 80, fetch_result: 20 };
+const BOOT = 300;  // seconds for a sleeping GPU to wake up
+const jobKey = (tool, p = {}) => [tool, p.quality || "", p.turbo ? "turbo" : "", p.kind || "", Math.round(+p.seconds || +p.audio_seconds || 0)].join("|");
+const typicalSecs = job => store.get("durations", {})[job.key] || TYPICAL[job.tool] || 120;
+function learnSecs(job, secs) {
+  if (!job.key || !(secs > 0)) return;
+  const d = store.get("durations", {}); d[job.key] = d[job.key] ? Math.round(d[job.key] * 0.5 + secs * 0.5) : Math.round(secs); store.set("durations", d);
+}
+const fmtLeft = s => s < 20 ? "a few seconds" : s < 90 ? `about ${Math.round(s / 10) * 10} s` : `about ${Math.round(s / 60)} min`;
+// One estimate for both phases: waking the GPU (IN_QUEUE) and generating (IN_PROGRESS, with live progress from the worker).
+function estimate(job, s) {
+  const now = Date.now() / 1000;
+  if (s.status === "IN_QUEUE") {
+    const waited = now - job.started / 1000, total = job.warm ? 30 : BOOT;
+    const left = Math.max(10, total - waited);
+    return { title: job.warm ? "Starting" : "Waking up the GPU", pct: Math.min(0.95, waited / (waited + left)), left };
+  }
+  job.runStart ??= now;
+  const p = s.output?.ai_progress, T = typicalSecs(job);
+  const e = p?.elapsed ?? now - job.runStart;
+  let left = Math.max(0, T - e);
+  if (p && p.max > 1 && p.value > 0) {  // inside a node that counts steps: time per step x steps left
+    const stepsLeft = (p.max - p.value) * (p.node_elapsed / p.value) + 0.12 * T;
+    left = left > 0 ? Math.max(left, stepsLeft) : stepsLeft;
+  }
+  if (left <= 0) left = 15;  // longer than usual: almost done
+  return { title: "Generating", pct: Math.min(0.98, e / (e + left)), left };
+}
+function progressHtml(est, clock) {
+  return `<div class="prog"><div class="bar"><i style="width:${(est.pct * 100).toFixed(1)}%"></i></div>`
+    + `<div class="row2"><span><b>${est.title}</b> · ${Math.round(est.pct * 100)}%</span><span>${fmtLeft(est.left)} left · ${clock}</span></div></div>`;
+}
+
 // ------------------------------------------------------------------ jobs
 const pendingJobs = () => store.get("jobs", []);
 const setJobs = j => { store.set("jobs", j); updateBadge(); };
@@ -655,7 +696,7 @@ async function makeSpeech(text, voice, btn) {
     await new Promise(r => setTimeout(r, 4000));
     let s; try { s = await runpod("GET", `status/${res.id}`); } catch { continue; }
     const secs = Math.round((Date.now() - t0) / 1000);
-    btn.textContent = s.status === "IN_QUEUE" ? `Step 1 of 2: waking the GPU… ${secs}s` : `Step 1 of 2: making the voice… ${secs}s`;
+    btn.textContent = (s.status === "IN_QUEUE" ? `Step 1 of 2: waking the GPU… ${secs}s` : `Step 1 of 2: making the voice… ${secs}s`) + " · keep AI Studio open";
     if (s.status === "COMPLETED") {
       const it = (s.output?.images || []).find(x => x.type === "base64" && /\.(flac|wav|mp3)$/i.test(x.filename || ""));
       if (!it) throw new Error("The voice step returned no audio.");
@@ -670,13 +711,15 @@ async function submit() {
   btn.disabled = true;
   try {
     const [tool, p] = await buildParams(t, btn);
-    btn.textContent = "Sending…";
+    btn.textContent = "Sending… keep AI Studio open";
     const [wf, uploads] = TOOLS[tool](p);
-    const input = { workflow: wf }; if (uploads.length) input.images = uploads;
+    const input = { workflow: wf, ai_tool: tool }; if (uploads.length) input.images = uploads;  // tool name: lets the PC label it
     const size = JSON.stringify(input).length;
     if (size > 9.5e6) throw new InputError("These files are too big to send (RunPod accepts about 10 MB). Use a shorter or smaller file.");
     const res = await runpod("POST", "run", { input });
-    const job = { id: res.id, tool, prompt: p.prompt, started: Date.now() };
+    const w = health?.workers || {};
+    const job = { id: res.id, tool, prompt: p.prompt, started: Date.now(), key: jobKey(tool, p),
+                  warm: (w.idle || 0) + (w.running || 0) + (w.ready || 0) > 0 };
     setJobs([...pendingJobs(), job]);
     watchJob(job);
   } catch (e) {
@@ -698,8 +741,13 @@ function paint(job, html, status, actions) {
 function button(text, fn, cls = "btn") { const b = Object.assign(document.createElement("button"), { type: "button", className: cls, textContent: text }); b.onclick = fn; return b; }
 
 async function watchJob(job) {
-  const cancel = button("Cancel", async () => { try { await runpod("POST", `cancel/${job.id}`); } catch {} });
-  paint(job, `<div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Working…</div>`, `<span class="spin"></span><span>Sending…</span>`, [cancel]);
+  const cancel = button("Cancel", async () => {
+    cancel.disabled = true; cancel.textContent = "Cancelling…";
+    try { await runpod("POST", `cancel/${job.id}`); job.cancelled = true; }
+    catch (e) { cancel.disabled = false; cancel.textContent = "Cancel"; alert("Couldn't cancel: " + (e.message || e)); }
+  });
+  paint(job, `<div class="empty"><div class="spin" style="margin:0 auto 10px"></div>Working on it on the GPU.<br>You can switch to other apps now: the result will be here when you come back.</div>`,
+    `<span class="spin"></span><span>Checking…</span>`, [cancel]);
   if (watching.has(job.id)) return;
   watching.add(job.id);
   try {
@@ -708,12 +756,26 @@ async function watchJob(job) {
       let s;
       try { s = await runpod("GET", `status/${job.id}`); } catch (e) {
         if (/key/.test(e.message)) throw e;
+        if (/error 404/.test(e.message) && !job.recovering) {
+          // RunPod forgets a result 30 min after the job ends (e.g. the phone was in another app).
+          // The worker keeps a copy for 3 days: ask for it with a small job.
+          const [wf] = TOOLS.fetch_result({ job_id: job.id });
+          const res = await runpod("POST", "run", { input: { workflow: wf } });
+          Object.assign(job, { id: res.id, original: job.id, recovering: true, started: Date.now(), runStart: undefined });
+          setJobs(pendingJobs().map(j => j.id === job.original ? { ...job } : j));
+          watching.add(job.id);
+          paint(job, null, `<span class="spin"></span><span>Getting your finished result back…</span>`);
+          continue;
+        }
         continue;  // network hiccup: ask again
       }
       const secs = Math.round((Date.now() - job.started) / 1000), clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-      if (s.status === "IN_QUEUE") paint(job, null, `<span class="spin"></span><span>Waking up the GPU… ${clock}</span>`);
-      else if (s.status === "IN_PROGRESS") paint(job, null, `<span class="spin"></span><span>Generating… ${clock}</span>`);
+      if (s.status === "IN_QUEUE" || s.status === "IN_PROGRESS") {
+        if (job.cancelled) paint(job, null, `<span class="spin"></span><span>Cancelling…</span>`);
+        else paint(job, null, progressHtml(estimate(job, s), clock));
+      }
       else if (s.status === "COMPLETED") {
+        if (!job.recovering) learnSecs(job, (s.executionTime || 0) / 1000);
         const item = await storeResult(job, s);
         setJobs(pendingJobs().filter(j => j.id !== job.id));
         if (!item.files.length) throw new Error(s.output?.error || "The job finished but returned no files.");
@@ -725,7 +787,8 @@ async function watchJob(job) {
         break;
       } else if (["FAILED", "CANCELLED", "TIMED_OUT"].includes(s.status) || s.error) {
         setJobs(pendingJobs().filter(j => j.id !== job.id));
-        throw new Error(s.status === "CANCELLED" ? "Cancelled." : String(s.error || s.status).slice(0, 500));
+        if (s.status === "CANCELLED") { paint(job, `<div class="empty">Cancelled</div>`, `<span>Cancelled. The GPU stopped working on it.</span>`, []); break; }
+        throw new Error(String(s.error || s.status).slice(0, 500));
       }
     }
   } catch (e) {
@@ -743,7 +806,7 @@ async function storeResult(job, s) {
     const bytes = unb64(it.data);
     list.push({ name: `${job.tool}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}_${list.length}${ext}`, ext, blob: new Blob([bytes], { type }) });
   }
-  const item = { id: job.id, tool: job.tool, prompt: job.prompt, created: Date.now(), files: list };
+  const item = { id: job.original || job.id, tool: job.tool, prompt: job.prompt, created: Date.now(), files: list };
   if (list.length) await saveItem(item);
   return item;
 }
@@ -791,15 +854,50 @@ function itemActions(item) {
   return acts;
 }
 
+// Jobs on the GPU that this phone didn't start (RunPod lists every queued/running request of the endpoint).
+async function otherJobs(pend) {
+  try {
+    const mine = new Set(pend.flatMap(j => [j.id, j.original]));
+    const { requests = [] } = await runpod("GET", "requests");
+    const busy = requests.filter(r => ["IN_QUEUE", "IN_PROGRESS"].includes(r.status) && !mine.has(r.id)).slice(0, 6);
+    return (await Promise.all(busy.map(r => runpod("GET", `status/${r.id}`).catch(() => null))))
+      .filter(s => s && ["IN_QUEUE", "IN_PROGRESS"].includes(s.status) && s.output?.ai_progress?.tool !== "wake_up");
+  } catch { return []; }
+}
+let galleryTimer;
 async function renderGallery() {
   const grid = $("#gallery");
   const pend = pendingJobs();
   const items = (await allItems().catch(() => [])).sort((a, b) => b.created - a.created);
-  if (!items.length && !pend.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`; return; }
+  const elsewhere = await otherJobs(pend);
+  clearTimeout(galleryTimer);  // keep the in-progress cards fresh while Results is open
+  if (pend.length || elsewhere.length) galleryTimer = setTimeout(() => { if (!$("#v-gallery").hidden && !document.hidden) renderGallery(); }, 8000);
+  if (!items.length && !pend.length && !elsewhere.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`; return; }
   grid.innerHTML = "";
   for (const j of pend) {
     const b = button("", () => UI_BY_TOOL[j.tool] && openTool(UI_BY_TOOL[j.tool].id), "thumb");
-    b.innerHTML = `<div class="glyph"><div class="spin"></div></div><span class="kind">${esc(UI_BY_TOOL[j.tool]?.title || j.tool)}</span>`;
+    b.innerHTML = `<div class="glyph"><div class="spin"></div><small style="display:block;margin-top:6px;font-size:11px" data-left></small></div>`
+      + `<div style="position:absolute;left:8px;right:8px;bottom:26px;height:5px;border-radius:99px;background:var(--line);overflow:hidden"><i data-bar style="display:block;height:100%;width:0;background:var(--accent)"></i></div>`
+      + `<span class="kind">${esc(UI_BY_TOOL[j.tool]?.title || j.tool)}</span>`;
+    runpod("GET", `status/${j.id}`).then(s => {
+      if (!["IN_QUEUE", "IN_PROGRESS"].includes(s.status)) return;
+      const est = estimate({ ...j }, s);
+      $("[data-bar]", b).style.width = `${(est.pct * 100).toFixed(0)}%`;
+      $("[data-left]", b).textContent = `${fmtLeft(est.left)} left`;
+    }).catch(() => {});
+    grid.append(b);
+  }
+  for (const j of elsewhere) {  // started on the PC (or another phone): shown while it runs
+    const b = button("", () => {}, "thumb");
+    let label = j.status === "IN_QUEUE" ? "Waiting for the GPU" : "Generating", bar = "";
+    const p = j.output?.ai_progress;
+    if (j.status === "IN_PROGRESS" && p) {
+      const est = estimate({ tool: p.tool, key: "", started: Date.now(), runStart: Date.now() / 1000 - p.elapsed }, j);
+      label = `${fmtLeft(est.left)} left`;
+      bar = `<div class="bar" style="position:absolute;left:8px;right:8px;bottom:26px;height:5px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${(est.pct * 100).toFixed(0)}%;background:var(--accent)"></i></div>`;
+    }
+    b.innerHTML = `<div class="glyph"><div class="spin"></div><small style="display:block;margin-top:6px;font-size:11px">${esc(label)}</small></div>${bar}`
+      + `<span class="kind">${esc(UI_BY_TOOL[p?.tool]?.title || "From PC")}</span>`;
     grid.append(b);
   }
   for (const it of items) {
