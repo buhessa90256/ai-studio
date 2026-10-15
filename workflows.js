@@ -585,7 +585,9 @@ function wake_up() {
 
 // Get a finished job's files again from the copy the worker keeps for 3 days (RunPod forgets after 30 min).
 function fetch_result(params) {
-  return [{ "1": { class_type: "AIStudioFetchResult", inputs: { job_id: String(params.job_id || "") } } }, []];
+  const inputs = { job_id: String(params.job_id || "") };
+  if (params.file) Object.assign(inputs, { file: String(params.file), part: Number(params.part || 0) });  // one ~6 MB piece
+  return [{ "1": { class_type: "AIStudioFetchResult", inputs } }, []];
 }
 
 // klein_*, ltx2_t2v and hunyuan_3d stay above for reference; their models were removed from the volume.

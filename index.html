@@ -238,7 +238,7 @@
   <div class="actions" id="viewer-actions"></div>
 </div>
 
-<script src="workflows.js?v=20261015"></script>
+<script src="workflows.js?v=20261015b"></script>
 <script>
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -756,11 +756,11 @@ async function watchJob(job) {
       let s;
       try { s = await runpod("GET", `status/${job.id}`); } catch (e) {
         if (/key/.test(e.message)) throw e;
-        if (/error 404/.test(e.message) && !job.recovering) {
+        if (/error 404/.test(e.message) && !job.recovering) {  // also used below for an empty result
           // RunPod forgets a result 30 min after the job ends (e.g. the phone was in another app).
           // The worker keeps a copy for 3 days: ask for it with a small job.
           const [wf] = TOOLS.fetch_result({ job_id: job.id });
-          const res = await runpod("POST", "run", { input: { workflow: wf } });
+          const res = await runpod("POST", "run", { input: { workflow: wf, ai_tool: "fetch_result" } });
           Object.assign(job, { id: res.id, original: job.id, recovering: true, started: Date.now(), runStart: undefined });
           setJobs(pendingJobs().map(j => j.id === job.original ? { ...job } : j));
           watching.add(job.id);
@@ -773,6 +773,15 @@ async function watchJob(job) {
       if (s.status === "IN_QUEUE" || s.status === "IN_PROGRESS") {
         if (job.cancelled) paint(job, null, `<span class="spin"></span><span>Cancelling…</span>`);
         else paint(job, null, progressHtml(estimate(job, s), clock));
+      }
+      else if (s.status === "COMPLETED" && !job.recovering && !(s.output?.images || []).length) {
+        // RunPod returned nothing (a result from an older worker that was too big): get the saved copy
+        const [wf] = TOOLS.fetch_result({ job_id: job.id });
+        const res = await runpod("POST", "run", { input: { workflow: wf, ai_tool: "fetch_result" } });
+        Object.assign(job, { id: res.id, original: job.id, recovering: true, started: Date.now(), runStart: undefined });
+        setJobs(pendingJobs().map(j => j.id === job.original ? { ...job } : j));
+        paint(job, null, `<span class="spin"></span><span>Getting your finished result back…</span>`);
+        continue;
       }
       else if (s.status === "COMPLETED") {
         if (!job.recovering) learnSecs(job, (s.executionTime || 0) / 1000);
@@ -796,14 +805,52 @@ async function watchJob(job) {
   } finally { watching.delete(job.id); }
 }
 
+// A result too big for RunPod to return comes back as a list of saved files ("ai_saved"), or, when it is
+// fetched again later, as listing.json. Each file is then fetched in ~6 MB pieces with small jobs.
+async function runSmall(wf) {
+  const { id } = await runpod("POST", "run", { input: { workflow: wf, ai_tool: "fetch_result" } });
+  while (true) {
+    await new Promise(r => setTimeout(r, 2500));
+    let s; try { s = await runpod("GET", `status/${id}`); } catch { continue; }
+    if (s.status === "COMPLETED") return s;
+    if (!["IN_QUEUE", "IN_PROGRESS"].includes(s.status)) throw new Error(String(s.error || s.status).slice(0, 300));
+  }
+}
+async function fetchBig(jobId, entries, onStep) {
+  const files = [], total = entries.reduce((n, e) => n + e.parts, 0);
+  let done = 0;
+  for (const e of entries) {
+    const pieces = [];
+    for (let part = 0; part < e.parts; part++) {
+      onStep(done, total);
+      const [wf] = TOOLS.fetch_result({ job_id: jobId, file: e.filename, part });
+      const s = await runSmall(wf);
+      const it = (s.output?.images || []).find(x => x.type === "base64");
+      if (!it) throw new Error(`Piece ${part + 1} of ${e.filename} didn't come back.`);
+      pieces.push(unb64(it.data)); done++;
+    }
+    files.push({ filename: e.filename, bytes: new Blob(pieces) });
+  }
+  return files;
+}
 async function storeResult(job, s) {
   const out = s.output || {}, list = [];
+  const big = (out.images || []).filter(x => x.type === "ai_saved");
+  const listing = (out.images || []).find(x => x.type === "base64" && /listing\.json$/.test(x.filename || ""));
+  if (big.length || listing) {
+    const entries = big.length ? big : JSON.parse(new TextDecoder().decode(unb64(listing.data)));
+    const files = await fetchBig(job.original || job.id, entries, (d, t) =>
+      paint(job, null, progressHtml({ title: "Downloading your result", pct: t ? d / t : 0, left: (t - d) * 15 }, `${d}/${t}`)));
+    for (const f of files) add(f.filename, f.bytes);
+  }
   for (const it of out.images || []) {
-    if (it.type !== "base64" || (it.filename || "").startsWith("input_")) continue;
-    const ext = ((it.filename || "").match(/\.[a-z0-9]+$/i)?.[0] || ".png").toLowerCase();
+    if (it.type !== "base64" || (it.filename || "").startsWith("input_") || /listing\.json$/.test(it.filename || "")) continue;
+    add(it.filename || "", unb64(it.data));
+  }
+  function add(filename, bytes) {
+    const ext = (filename.match(/\.[a-z0-9]+$/i)?.[0] || ".png").toLowerCase();
     const type = { ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm",
       ".glb": "model/gltf-binary", ".flac": "audio/flac", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".json": "application/json" }[ext] || "application/octet-stream";
-    const bytes = unb64(it.data);
     list.push({ name: `${job.tool}_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "")}_${list.length}${ext}`, ext, blob: new Blob([bytes], { type }) });
   }
   const item = { id: job.original || job.id, tool: job.tool, prompt: job.prompt, created: Date.now(), files: list };
