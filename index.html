@@ -238,7 +238,7 @@
   <div class="actions" id="viewer-actions"></div>
 </div>
 
-<script src="workflows.js?v=20261015b"></script>
+<script src="workflows.js?v=20261015c"></script>
 <script>
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -911,6 +911,58 @@ async function otherJobs(pend) {
       .filter(s => s && ["IN_QUEUE", "IN_PROGRESS"].includes(s.status) && s.output?.ai_progress?.tool !== "wake_up");
   } catch { return []; }
 }
+// "Find missing results": the GPU worker keeps every result for 3 days. List the ones this phone doesn't
+// have (e.g. it lost track of a job), and download the one you tap.
+const KIND_BY_EXT = { ".glb": "trellis_3d", ".mp4": "minimax_h3", ".webm": "minimax_h3", ".png": "qwen_image", ".jpg": "qwen_image",
+  ".webp": "qwen_image", ".flac": "stable_audio", ".wav": "f5_voice", ".mp3": "f5_voice", ".json": "hy_motion" };
+async function findMissing(btn) {
+  btn.disabled = true; btn.textContent = "Asking the GPU for saved results… (can take a few minutes if it's asleep)";
+  try {
+    const [wf] = TOOLS.fetch_result({ job_id: "*" });
+    const s = await runSmall(wf);
+    const it = (s.output?.images || []).find(x => x.type === "base64");
+    if (!it) throw new Error("The GPU didn't send the list back.");
+    const have = new Set((await allItems()).map(i => i.id));
+    // skip the pieces and lists that fetching itself left behind, and repeat copies of the same file
+    const seen = new Set();
+    const missing = JSON.parse(new TextDecoder().decode(unb64(it.data))).reverse().filter(r => {
+      if (have.has(r.job_id) || !r.files.length) return false;
+      if (r.files.every(f => /^(part\d{3}_|listing\.json$|all_\d+\.json$)/.test(f.filename))) return false;
+      const key = r.files.map(f => f.filename + f.size).join("|");
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).reverse();
+    const box = document.createElement("div");
+    box.style.gridColumn = "1/-1";
+    box.className = "card";
+    if (!missing.length) box.innerHTML = `<p class="sub" style="margin:0">Nothing missing: every saved result of the last 3 days is already on this phone.</p>`;
+    else box.innerHTML = `<p class="sub" style="margin:0 0 8px">Saved on the GPU in the last 3 days and not on this phone yet. Tap one to download it.</p>`;
+    for (const r of missing) {
+      const mb = r.files.reduce((n, f) => n + f.size, 0) / 1e6;
+      const ext = (r.files[0].filename.match(/\.[a-z0-9]+$/i)?.[0] || "").toLowerCase();
+      const kind = UI_BY_TOOL[KIND_BY_EXT[ext]]?.title || "Result";
+      const when = new Date(r.time * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      const b = button(`${kind} · ${when} · ${mb.toFixed(1)} MB`, async () => {
+        b.disabled = true;
+        try {
+          const files = await fetchBig(r.job_id, r.files, (d, t) => { b.textContent = `Downloading… ${d}/${t}`; });
+          const list = files.map((f, i) => {
+            const e = (f.filename.match(/\.[a-z0-9]+$/i)?.[0] || ".bin").toLowerCase();
+            const type = { ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm",
+              ".glb": "model/gltf-binary", ".flac": "audio/flac", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".json": "application/json" }[e] || "application/octet-stream";
+            return { name: `${KIND_BY_EXT[e] || "result"}_${r.job_id.slice(0, 8)}_${i}${e}`, ext: e, blob: new Blob([f.bytes], { type }) };
+          });
+          await saveItem({ id: r.job_id, tool: KIND_BY_EXT[ext] || "result", prompt: "Recovered from the GPU", created: r.time * 1000, files: list });
+          renderGallery();
+        } catch (e) { b.disabled = false; b.textContent = "Couldn't download: " + (e.message || e); }
+      }, "btn");
+      b.style.cssText = "display:block;width:100%;margin-top:6px;text-align:left";
+      box.append(b);
+    }
+    btn.after(box);
+    btn.remove();
+  } catch (e) { btn.disabled = false; btn.textContent = "Find missing results (failed: " + (e.message || e) + ")"; }
+}
 let galleryTimer;
 async function renderGallery() {
   const grid = $("#gallery");
@@ -919,8 +971,14 @@ async function renderGallery() {
   const elsewhere = await otherJobs(pend);
   clearTimeout(galleryTimer);  // keep the in-progress cards fresh while Results is open
   if (pend.length || elsewhere.length) galleryTimer = setTimeout(() => { if (!$("#v-gallery").hidden && !document.hidden) renderGallery(); }, 8000);
-  if (!items.length && !pend.length && !elsewhere.length) { grid.innerHTML = `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`; return; }
   grid.innerHTML = "";
+  const find = button("Find missing results", () => findMissing(find), "btn");
+  find.style.gridColumn = "1/-1";
+  grid.append(find);
+  if (!items.length && !pend.length && !elsewhere.length) {
+    grid.insertAdjacentHTML("beforeend", `<div class="empty" style="grid-column:1/-1">Nothing yet. Your results are saved here on this phone.</div>`);
+    return;
+  }
   for (const j of pend) {
     const b = button("", () => UI_BY_TOOL[j.tool] && openTool(UI_BY_TOOL[j.tool].id), "thumb");
     b.innerHTML = `<div class="glyph"><div class="spin"></div><small style="display:block;margin-top:6px;font-size:11px" data-left></small></div>`
