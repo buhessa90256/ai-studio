@@ -137,6 +137,7 @@
 <body>
 <header>
   <h1><button class="back" id="back" hidden aria-label="Back">‹</button><span id="title">AI Studio</span></h1>
+  <button class="gpu" id="money" type="button" title="RunPod credit left">$ …</button>
   <button class="gpu" id="gpu" type="button"><span class="dot"></span><span>GPU</span></button>
 </header>
 
@@ -186,6 +187,10 @@
 
   <!-- Settings -->
   <section id="v-settings" hidden>
+    <div class="card">
+      <h2 style="margin:0 0 6px;font-size:16px">RunPod credit</h2>
+      <p class="sub" id="money-detail">Checking…</p>
+    </div>
     <div class="card">
       <h2 style="margin:0 0 6px;font-size:16px">GPU</h2>
       <p class="sub" id="gpu-detail">Checking…</p>
@@ -857,6 +862,33 @@ async function keepWarm(force) {
   try { const [wf] = TOOLS.wake_up(); await runpod("POST", "run", { input: { workflow: wf } }); } catch {}
 }
 $("#gpu").onclick = () => { current = null; show("settings"); };
+
+// RunPod credit left. RunPod doesn't let web pages read the balance, so AI Studio on the PC copies it
+// (only the numbers) to an unlisted GitHub gist every 10 minutes while it runs; this reads that copy.
+const BALANCE_URL = "https://api.github.com/gists/a255a34101ca1fd6cf8f6c099e7de585";
+let money = store.get("money");
+function ago(t) {
+  const m = Math.round((Date.now() / 1000 - t) / 60);
+  return m < 2 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+function paintMoney() {
+  const chip = $("#money"), detail = $("#money-detail");
+  if (!money || money.balance == null) { chip.textContent = "$ ?"; detail.textContent = "Not known yet. Open AI Studio on your PC once and it will appear here."; return; }
+  chip.textContent = `$${money.balance.toFixed(2)}`;
+  chip.style.color = money.balance < 5 ? "var(--bad)" : "";
+  detail.textContent = `$${money.balance.toFixed(2)} left (checked ${ago(money.updated)} by AI Studio on your PC).`
+    + (money.per_hour > 0 ? ` Spending was $${money.per_hour.toFixed(2)}/hour at that moment.` : "")
+    + (money.limit ? ` Spend limit $${money.limit}.` : "");
+}
+async function refreshMoney() {
+  try {
+    const g = await (await fetch(BALANCE_URL, { cache: "no-store" })).json();
+    const b = JSON.parse(g.files["ai-studio-balance.json"].content);
+    if (b.balance != null) { money = b; store.set("money", b); }
+  } catch {}
+  paintMoney();
+}
+$("#money").onclick = () => { current = null; show("settings"); };
 function renderSettings() {
   $("#warm").checked = !!store.get("warm");
   const w = health?.workers || {};
@@ -901,11 +933,12 @@ function start() {
   if (!API_KEY) API_KEY = store.get("apikey");
   if (!API_KEY && store.get("vault")) { show("lock"); setTimeout(() => $("#unlock-pin").focus(), 50); return; }
   if (!API_KEY) { show("setup"); return; }
-  renderHome(); show("home"); updateBadge(); refreshGpu();
+  renderHome(); show("home"); updateBadge(); refreshGpu(); refreshMoney();
   for (const job of pendingJobs()) watchJob(job);  // pick up jobs from before a reload
   if (!timers) {
     timers = true;
     setInterval(refreshGpu, 20000);
+    setInterval(refreshMoney, 5 * 60 * 1000);
     setInterval(() => keepWarm(false), 60000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) { refreshGpu(); keepWarm(false); } });
   }
