@@ -12,6 +12,16 @@ so keep explanations short and in plain language: what changed, how to see it, n
 - The user's RunPod API key is saved only in the phone's browser (`localStorage` "apikey"; an old PIN-locked "vault" is
   unlocked once and converted). There is **no key in this repository** — never add one, never ask for it, never log it.
 - Results are kept on the phone in IndexedDB ("ai-studio" / "items").
+- **Studio** (bottom-nav tab, `studio/`): projects, characters, assets, storyboard, director, editor, workflows, queue, models, dashboard.
+  It is the PC app's "Studio Pro" running entirely in the page, with everything stored in IndexedDB "studio-pro" on THIS device (never in the repo,
+  never on a server). The screens (`studio/studio.js`, `storyboard.js`, `director.js`, `editor.js`, `flows.js`, `ops.js`) were written for the PC app's
+  server and call `/api/studio/*`, `/api/generate`, `/api/status/<id>` ...; `studio/shim.js` overrides `fetch` for `/api/...` and answers from
+  `studio/backend.js` (port of the PC's Python modules: assets, characters, projects, scenes, prompts, workflows, models, timeline, character board,
+  last frame) and `studio/jobs.js` (RunPod jobs with the app's own `runpod()`, `TOOLS`, `fetchBig`; job log; finished jobs are attached to their scenes
+  even if the screen is closed). `studio/export.js` makes the final MP4 in the browser (canvas + WebCodecs + OfflineAudioContext + the vendored
+  `studio/vendor/mp4-muxer.js`, MIT, unmodified). Not available here (need a PC): speech-to-text subtitles and face-similarity checks.
+  The PC app (private repo `ai-studio-pc`, folder `ai-studio-web/`) has copies of the same screens: **change `studio/*.js` here first and copy them to the PC
+  app** (the PC copies differ only by `document.getElementById("studio-main") || document.querySelector("main")`).
 
 ## Rules that matter
 - `workflows.js` mirrors `workflows.py` of the PC version (not in this repo). Keep node ids, inputs and model file names
@@ -33,7 +43,11 @@ so keep explanations short and in plain language: what changed, how to see it, n
   web pages.
 
 ## Testing
-- There is no key here, so you can't run real jobs. Check that the page loads with no script errors
+- Real jobs without putting the RunPod key in a page: run the PC app (`ai-studio-pc`), serve this folder (`python -m http.server 8800 --bind 127.0.0.1`),
+  open http://localhost:8800/index.html, and in the browser console set `localStorage.dev_runpod_base = JSON.stringify("http://127.0.0.1:8765/rp")` and a
+  placeholder `apikey` (any text). The PC server's dev-only `/rp/*` route then forwards to RunPod with its own key and answers only the origin
+  localhost:8800. A real keyframe, a real sound and a real browser export were tested this way. Put throwaway test files in `_dev/` (git-ignored).
+- (Older note) There is no key here, so you can't run real jobs. Check that the page loads with no script errors
   (`python -m http.server` and open it, or a headless browser) and test pure functions (e.g. `estimate`, `fmtLeft`)
   with sample data. With no key the page shows the setup screen — that is expected.
 - Keep it working on a small iPhone screen (375 px wide) and in dark mode.

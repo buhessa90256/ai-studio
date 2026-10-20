@@ -1,0 +1,47 @@
+/* Studio view inside the phone app. Base styles the Studio Pro screens expect (the PC app has them in its own page); scoped to #v-studio. */
+#v-studio { margin: 0 -16px; }
+#v-studio #tabs { position: sticky; top: calc(54px + env(safe-area-inset-top, 0px)); z-index: 5; display: flex; gap: 6px; overflow-x: auto; padding: 8px 16px; background: var(--bg);
+  border-bottom: 1px solid var(--line); scrollbar-width: none; }
+#v-studio #tabs::-webkit-scrollbar { display: none; }
+#v-studio #tabs button { flex: none; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 8px 14px; font-size: 14px; white-space: nowrap; }
+#v-studio #tabs button.active { background: var(--soft); color: var(--ink); border-color: var(--accent); font-weight: 600; }
+#v-studio #studio-main { padding: 14px 16px 24px; }
+#v-studio .tab { display: none; } #v-studio .tab.active { display: block; }
+#v-studio .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+#v-studio .card h2 { font-size: 16px; margin: 0 0 4px; } #v-studio .sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+#v-studio label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+#v-studio textarea, #v-studio input[type=text], #v-studio input[type=number], #v-studio input[type=password], #v-studio select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+#v-studio textarea { min-height: 96px; resize: vertical; }
+#v-studio .row { display: flex; gap: 10px; } #v-studio .row > * { flex: 1; }
+#v-studio .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+#v-studio .chips button { font: inherit; font-size: 13px; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+#v-studio .chips button.on { background: var(--soft); border-color: var(--accent); }
+#v-studio .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 14px; font-weight: 400; }
+#v-studio .check input { width: auto; }
+#v-studio .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+#v-studio .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+#v-studio .actions a, #v-studio .actions button { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none; }
+#v-studio .prog { width: 100%; } #v-studio .prog .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 2px 0 6px; }
+#v-studio .prog .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .8s ease; }
+#v-studio .prog .row2 { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; color: var(--muted); }
+#v-studio .spin { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; }
+@keyframes s { to { transform: rotate(360deg); } }
+/* modals created by the Studio screens are appended to <body>, outside #v-studio: give them the same base look */
+.sp-box label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
+.sp-box textarea, .sp-box input[type=text], .sp-box input[type=number], .sp-box select { width: 100%; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.sp-box textarea { min-height: 80px; resize: vertical; }
+.sp-box .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.sp-box .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+.sp-box .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-box .chips button { font: inherit; font-size: 13px; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.sp-box .chips button.on { background: var(--soft); border-color: var(--accent); }
+.sp-box .check { display: flex; align-items: center; gap: 8px; font-weight: 400; } .sp-box .check input { width: auto; }
+.sp-modal { z-index: 90 !important; }
+
+/* storyboard scene header on a narrow screen: title gets its own room, status and arrows wrap below */
+#v-studio .sb-head { flex-wrap: wrap; gap: 8px; }
+#v-studio .sb-head .t { flex: 1 1 120px; min-width: 120px; }
+#v-studio .sb-head .t span { white-space: normal; }
+#v-studio .sb-head .sb-st { margin-left: auto; }
+#v-studio .sb-th { width: 72px; }
