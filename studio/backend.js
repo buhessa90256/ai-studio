@@ -120,13 +120,13 @@
     return charView(c);
   }
   async function deleteCharacter(id) { const c = await D.get("characters", id); if (c) { c.deleted = 1; c.updated = now(); await D.put("characters", c); } }
-  function characterPrompt(chars) {
+  function characterPrompt(chars, arrangement = "left to right") {
     const parts = chars.map(c => {
       const bits = [c.age, c.hair && (/hair/i.test(c.hair) ? c.hair : c.hair + " hair"), c.eyes && (/eye/i.test(c.eyes) ? c.eyes : c.eyes + " eyes"), c.description].filter(Boolean);
       return c.name + (bits.length ? " (" + bits.join(", ") + ")" : "");
     });
     if (chars.length === 1) return `The reference shows ${parts[0]}. Keep the exact same face, hair and clothes.`;
-    return "The reference shows, left to right: " + parts.join("; ") + ". Keep the exact same faces, hair and clothes for each.";
+    return `The reference shows, ${arrangement}: ` + parts.join("; ") + ". Keep the exact same faces, hair and clothes for each.";
   }
   const primaryRef = c => (c.refs.find(r => r.role === "primary") || c.refs.find(r => r.role === "face") || c.refs[0])?.asset || null;
 
@@ -140,9 +140,29 @@
       if (!a || !a.mime.startsWith("image/")) throw bad(`${c.name} has no reference photo yet. Add one in the Characters tab.`);
       imgs.push(await createImageBitmap(await getBlob(a.id)));
     }
-    const n = imgs.length, slotW = n > 1 ? Math.floor(width / n) : Math.floor(height * 0.58);
+    const n = imgs.length, tall = height > width;
     const cv = document.createElement("canvas"); cv.width = width; cv.height = height;
     const g = cv.getContext("2d"); g.fillStyle = "rgb(225,215,200)"; g.fillRect(0, 0, width, height);
+    if (tall) {  // 9:16: the board must be tall too (characters top to bottom), otherwise the start frame comes out wide and gets stretched later
+      const slotH = Math.floor(height / n);
+      imgs.forEach((im, i) => {
+        const y = i * slotH, cover = Math.max(width / im.width, slotH / im.height);
+        const kept = Math.min(1, width / cover / im.width) * Math.min(1, slotH / cover / im.height);
+        g.save(); g.beginPath(); g.rect(0, y, width, slotH); g.clip();
+        if (kept >= 0.75) g.drawImage(im, (im.width - width / cover) / 2, 0, width / cover, slotH / cover, 0, y, width, slotH);  // cover-crop, faces (top) kept
+        else {  // whole photo with its own proportions; the free space is a blurred, enlarged copy of the photo
+          const big = cover * 1.12; g.filter = "blur(" + Math.round(Math.max(width, slotH) / 40) + "px)";
+          g.drawImage(im, (width - im.width * big) / 2, y + (slotH - im.height * big) / 2, im.width * big, im.height * big); g.filter = "none";
+          const fit = Math.min(width / im.width, slotH / im.height);
+          g.drawImage(im, (width - im.width * fit) / 2, y + (slotH - im.height * fit) / 2, im.width * fit, im.height * fit);
+        }
+        g.restore();
+      });
+      const blobT = await new Promise(r => cv.toBlob(r, "image/png"));
+      const imageT = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blobT); });
+      return { image: imageT, prompt: characterPrompt(chars, "top to bottom"), names: chars.map(c => c.name) };
+    }
+    const slotW = n > 1 ? Math.floor(width / n) : Math.floor(height * 0.58);
     const x0 = Math.floor((width - slotW * n) / 2);
     imgs.forEach((im, i) => {  // cover-crop to the slot, keeping the top (faces)
       const s = Math.max(slotW / im.width, height / im.height), sw = slotW / s, sh = height / s;

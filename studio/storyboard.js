@@ -39,6 +39,24 @@
 
   const toDataUrl = async url => fileB64(await (await fetch(url)).blob());
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const sameShape = (w, h, W, H) => Math.abs(w / h - W / H) / (W / H) < 0.01;
+  // Fit a picture to exactly W x H WITHOUT stretching: one scale factor for both axes. A different shape shows the whole picture and fills the rest with a
+  // blurred, enlarged copy of itself (background extension); the same shape is scaled uniformly and trimmed by a few pixels.
+  async function fitToShape(url, W, H) {
+    const bmp = await createImageBitmap(await (await fetch(url)).blob());
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const g = cv.getContext("2d");
+    const cover = Math.max(W / bmp.width, H / bmp.height);
+    if (sameShape(bmp.width, bmp.height, W, H)) {
+      g.drawImage(bmp, (bmp.width - W / cover) / 2, (bmp.height - H / cover) / 2, W / cover, H / cover, 0, 0, W, H);
+    } else {
+      const big = cover * 1.12, bw = bmp.width * big, bh = bmp.height * big;  // oversized so the blur has no dark rim
+      g.filter = "blur(" + Math.round(Math.max(W, H) / 40) + "px)"; g.drawImage(bmp, (W - bw) / 2, (H - bh) / 2, bw, bh); g.filter = "none";
+      const fit = Math.min(W / bmp.width, H / bmp.height), dw = bmp.width * fit, dh = bmp.height * fit;
+      g.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    }
+    return fileB64(await new Promise(r => cv.toBlob(r, "image/png")));
+  }
+  async function imageSize(url) { const b = await createImageBitmap(await (await fetch(url)).blob()); return [b.width, b.height]; }
 
   async function pickAsset(kind = "image") {
     return new Promise(async resolve => {
@@ -67,7 +85,11 @@
         if (r.files && r.files.length) {
           const file = r.files.find(f => kind === "video" ? /\.(mp4|webm)$/i.test(f) : /\.(png|jpe?g|webp)$/i.test(f)) || r.files[0];
           const asset = await api("register", { file });
-          sc = await patch(sc, kind === "video" ? { video_asset: asset.id, status: "done", error: "" } : { start_asset: asset.id, status: "keyframe_ready", error: "" });
+          let note = "";
+          if (kind !== "video") {  // check the shape of the new start frame; videos are always fed a correctly shaped copy (see makeVideo)
+            try { const [pw, ph] = SIZE[S.project.aspect] || SIZE["16:9"], [iw, ih] = await imageSize(asset.url || ("/media/" + asset.id)); if (!sameShape(iw, ih, pw, ph)) note = `Note: this start frame is ${iw}x${ih} but the project is ${S.project.aspect}. It will be fitted without stretching (background extended) when the video is made.`; } catch {}
+          }
+          sc = await patch(sc, kind === "video" ? { video_asset: asset.id, status: "done", error: "" } : { start_asset: asset.id, status: "keyframe_ready", error: note });
           break;
         }
         if (r.error) { sc = await patch(sc, { status: String(r.error).toLowerCase().includes("cancel") ? "cancelled" : "failed", error: String(r.error).slice(0, 300) }); break; }
@@ -83,7 +105,7 @@
     if (!p.scene_text.trim()) throw new Error("Describe what happens in this scene first (Action).");
     let job;
     if (sc.characters.length) {
-      const b = await api("board", { characters: sc.characters, width: 1344, height: 768 });
+      const b = await api("board", { characters: sc.characters, width: w, height: hh });  // the board has the project's shape, so the start frame comes out in that shape
       job = await generate({ tool: "qwen_edit", params: { image: b.image, prompt: b.prompt + " Create a new photorealistic " + S.project.aspect + " photo of these same characters: " + p.scene_text + " Sharp, high detail, no extra people." } });
     } else job = await generate({ tool: "qwen_image", params: { prompt: p.scene_text + " Photorealistic, sharp, high detail.", width: w, height: hh, turbo: true } });
     sc = await patch(sc, { status: "keyframe_generating", job_id: job, error: "" });
@@ -98,8 +120,8 @@
     if (!sc.start_asset) throw new Error("This scene needs a start frame first.");
     const [w, hh] = SIZE[S.project.aspect] || SIZE["16:9"];
     const p = await api(`scenes/${sc.id}/prompt`);
-    const params = { prompt: p.video_prompt, image: await toDataUrl(sc.start_asset_url), width: w, height: hh, seconds: sc.duration, quality: "high" };
-    if (sc.end_asset) params.last_image = await toDataUrl(sc.end_asset_url);
+    const params = { prompt: p.video_prompt, image: await fitToShape(sc.start_asset_url, w, hh), width: w, height: hh, seconds: sc.duration, quality: "high" };  // exactly the video's shape: the model must not resize (stretch) it
+    if (sc.end_asset) params.last_image = await fitToShape(sc.end_asset_url, w, hh);
     const job = await generate({ tool: "minimax_h3", params });
     sc = await patch(sc, { status: "generating", job_id: job, error: "" });
     return track(sc, "video");
