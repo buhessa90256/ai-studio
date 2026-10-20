@@ -10,7 +10,7 @@
 <meta name="robots" content="noindex, nofollow">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="studio/studio.css?v=20261020a">
+<link rel="stylesheet" href="studio/studio.css?v=20261020b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>AI Studio</title>
 <style>
@@ -324,6 +324,7 @@ const UI = [
     ] },
   { id: "edit", group: "Images", glyph: "✎", title: "Edit image", desc: "Change a photo with words", tool: "qwen_edit",
     fields: [
+      { type: "characters", name: "chars", label: "Characters from your library (optional)", hint: "Pick characters and describe the new scene: their saved photos are combined into one reference so the faces stay the same (up to 4). While characters are picked, your own photo below is not used." },
       { type: "image", name: "image", label: "Photo" },
       { type: "text", name: "prompt", label: "What should change?", placeholder: "Make it night time with neon lights" },
       { type: "check", name: "turbo", label: "Turbo (about 3× faster)", value: true },
@@ -337,6 +338,7 @@ const UI = [
     ] },
   { id: "t2v", group: "Video", glyph: "♪", title: "Video with sound", desc: "MiniMax-H3 video + audio", tool: "minimax_h3",
     fields: [
+      { type: "characters", name: "chars", label: "Characters from your library (optional)", hint: "Adds each character's description to your text. For the best faces, first make a start frame in Edit image with the same characters, then use it as the start photo here." },
       { type: "image", name: "image", label: "Start photo (optional)", optional: true },
       { type: "text", name: "prompt", label: "Describe the scene and the sound", placeholder: "A street musician plays saxophone under a bridge at night, rain falling" },
       { type: "chips", name: "size", label: "Shape", options: [["1344x768", "Landscape"], ["768x1344", "Portrait"], ["1024x1024", "Square"]] },
@@ -456,6 +458,7 @@ function renderForm() {
     if (f.type === "chips") return `<label class="lbl">${f.label}</label><div class="chips" data-name="${f.name}">${
       f.options.map(([val, lab]) => `<button type="button" data-v="${val}" class="${String(v[f.name]) === String(val) ? "on" : ""}">${lab}</button>`).join("")}</div>`;
     if (f.type === "text") return `<label class="lbl" for="${id}">${f.label}${f.name === "prompt" && IDEA_KIND[t.id] ? `<button type="button" class="ideas-btn" data-ideas>Ideas</button>` : ""}</label><textarea id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}">${esc(v[f.name])}</textarea>`;
+    if (f.type === "characters") return `<label class="lbl">${f.label}</label><div class="charbox" data-chars><span class="hint">Loading…</span></div><p class="hint">${f.hint}</p>`;
     if (f.type === "line") return `<label class="lbl" for="${id}">${f.label}${f.name === "prompt" && IDEA_KIND[t.id] ? `<button type="button" class="ideas-btn" data-ideas>Ideas</button>` : ""}</label><input type="text" id="${id}" data-name="${f.name}" placeholder="${esc(f.placeholder)}" value="${esc(v[f.name])}">`;
     if (f.type === "number") return `<label class="lbl" for="${id}">${f.label}</label><input type="number" inputmode="decimal" id="${id}" data-name="${f.name}" min="${f.min}" max="${f.max}" step="${f.step}" value="${esc(v[f.name])}">`;
     if (f.type === "check") return `<label class="check"><input type="checkbox" data-name="${f.name}" ${v[f.name] ? "checked" : ""}> ${f.label}</label>`;
@@ -480,8 +483,27 @@ function renderForm() {
     input.click();
   };
   form.onsubmit = e => { e.preventDefault(); submit(); };
+  fillCharacters(form, v);
   const ib = $("[data-ideas]", form);
   if (ib) ib.onclick = e => { e.preventDefault(); openIdeas(t); };
+}
+
+// Characters from the Studio library (stored on this phone): tap to select; buildParams turns them into a reference picture / description.
+async function fillCharacters(form, v) {
+  const box = $("[data-chars]", form);
+  if (!box) return;
+  let items = [];
+  try { items = window.StudioBackend ? (await window.StudioBackend.route("GET", ["characters"], {}, {})).items : []; } catch {}
+  if (!items.length) { box.innerHTML = `<span class="hint">No characters yet. Create them in Studio → Characters.</span>`; return; }
+  const sel = new Set(v.chars || []);
+  box.innerHTML = "";
+  for (const c of items) {
+    const b = Object.assign(document.createElement("button"), { type: "button", className: sel.has(c.id) ? "on" : "" });
+    if (c.thumb) b.append(Object.assign(document.createElement("img"), { src: c.thumb, alt: "" }));
+    b.append(c.name);
+    b.onclick = () => { sel.has(c.id) ? sel.delete(c.id) : sel.add(c.id); v.chars = [...sel]; b.classList.toggle("on", sel.has(c.id)); };
+    box.append(b);
+  }
 }
 
 // ------------------------------------------------------------------ prompt ideas (prompts.chat, CC0)
@@ -594,8 +616,21 @@ async function buildParams(t, btn) {
   if (t.fields.some(x => x.name === "prompt" && !x.optional)) need(p.prompt, tool === "f5_voice" ? "Please type the text to speak." : "Please write a description first.");
   const imgField = t.fields.find(x => x.type === "image");
   if (imgField) {
-    need(f.image || imgField.optional, "Please choose a picture first.");
+    need(f.image || imgField.optional || (v.chars && v.chars.length), "Please choose a picture first.");
     if (f.image) p.image = await readImage(f.image, 1536, imgField.keepPng);
+  }
+  if (v.chars?.length && window.StudioBackend) {
+    const B = window.StudioBackend;
+    if (tool === "qwen_edit") {  // one reference picture: the characters' photos side by side, plus who is who
+      need(p.prompt, "Describe the scene for these characters.");
+      const b = await B.route("POST", ["board"], {}, { characters: v.chars, width: 1344, height: 768 });
+      p.image = b.image;
+      p.prompt = `${b.prompt} Create a new photorealistic 16:9 photo of these same characters: ${p.prompt} Sharp, high detail, no extra people.`;
+    } else if (tool === "minimax_h3") {  // faces come from the start photo; the text only adds descriptions
+      const b = await B.route("POST", ["characters_prompt"], {}, { characters: v.chars });
+      if (!p.image && !confirm("No start photo: faces will only follow the text descriptions and may not match your characters.\n\nContinue anyway? (Better: make a start frame in Edit image first.)")) throw new InputError("Add a start photo, or make a start frame in Edit image with these characters first.");
+      p.prompt = `${b.prompt} ${p.prompt}`;
+    }
   }
   if (v.quality) p.quality = v.quality;
   if (tool === "full_video") {
@@ -1163,6 +1198,7 @@ start();
 <script src="studio/idb.js?v=20261020a"></script>
 <script src="studio/backend.js?v=20261020a"></script>
 <script src="studio/jobs.js?v=20261020a"></script>
+<script src="studio/subtitles.js?v=20261020b"></script>
 <script src="studio/shim.js?v=20261020a"></script>
 <script src="studio/host.js?v=20261020a"></script>
 <script src="studio/studio.js?v=20261020a"></script>

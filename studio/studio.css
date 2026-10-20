@@ -45,3 +45,9 @@
 #v-studio .sb-head .t span { white-space: normal; }
 #v-studio .sb-head .sb-st { margin-left: auto; }
 #v-studio .sb-th { width: 72px; }
+
+/* character picker in the Create forms (outside #v-studio) */
+.charbox { display: flex; flex-wrap: wrap; gap: 6px; }
+.charbox button { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 14px; padding: 5px 12px 5px 5px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+.charbox button.on { background: var(--soft); border-color: var(--accent); }
+.charbox img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }

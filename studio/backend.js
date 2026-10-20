@@ -468,8 +468,16 @@
         if (method === "GET") return getTimeline(q.project);
         if (rest[0] === "from_scenes") return timelineFromScenes(json.project, json.replace !== false);
         return saveTimeline(json.project, json.timeline);
-      case "local_ai": return { subtitles: { available: false, install: "Subtitles and face checks need the PC app (they run models on a PC)." }, identity: { available: false, install: "Subtitles and face checks need the PC app (they run models on a PC)." } };
-      case "subtitles": case "identity": throw bad("This needs the PC version of AI Studio (it runs models on a PC).");
+      case "local_ai": {
+        const sub = !!window.StudioSubtitles;
+        return { subtitles: { available: sub, install: "Speech-to-text could not be loaded in this browser. The PC version of AI Studio can do it.",
+            note: "This exports the movie, then listens to its sound on this device to write subtitles. The first time it downloads a speech model (about 80 MB for Fast, about 250 MB for Better), which your browser then keeps. The sound never leaves this device. Continue?" },
+          identity: { available: false, install: "Face checks need the PC version of AI Studio." } };
+      }
+      case "subtitles":
+        if (!window.StudioSubtitles) throw bad("Speech-to-text is not available in this browser.");
+        return method === "GET" ? window.StudioSubtitles.status(rest[0]) : window.StudioSubtitles.start(json);
+      case "identity": throw bad("Face checks need the PC version of AI Studio.");
       default: return undefined;
     }
   }

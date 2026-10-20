@@ -119,7 +119,9 @@
       audioGenCard(),
       h("h3", { style: "margin:16px 0 6px" }, "Text & subtitles"), ...textItems,
       h("div", { class: "actions" }, h("button", { class: "sp-btn", onclick: () => { E.tl.texts.push({ id: uid(), text: "New text", start: 0, dur: 3, pos: "bottom", size: 44, color: "white", kind: "text" }); changed(); } }, "+ Text / subtitle"),
-        h("button", { class: "sp-btn", title: "Writes subtitles from the speech in your movie (runs on this PC)", onclick: guard(subtitlesFromSpeech) }, "Subtitles from speech")));
+        (() => { const l = h("select", { title: "Language spoken in the movie", style: "max-width:150px" }, [["", "Auto language"], ["en", "English"], ["ar", "Arabic"], ["fr", "French"], ["de", "German"], ["es", "Spanish"]].map(([v, t]) => h("option", { value: v, selected: (E.subLang || "") === v }, t))); l.onchange = () => { E.subLang = l.value; }; return l; })(),
+        window.StudioSubtitles ? (() => { const m = h("select", { title: "Speech model", style: "max-width:150px" }, [["base", "Fast (80 MB)"], ["small", "Better (250 MB)"]].map(([v, t]) => h("option", { value: v, selected: (E.subModel || "base") === v }, t))); m.onchange = () => { E.subModel = m.value; }; return m; })() : null,
+        h("button", { class: "sp-btn", title: "Writes subtitles from the speech in your movie", onclick: guard(subtitlesFromSpeech) }, "Subtitles from speech")));
     root.append(h("div", { class: "ed-wrap" }, left, right));
   }
 
@@ -169,19 +171,19 @@
     if (!st.available && window.StudioBackend) return alert(st.install);
     if (!st.available) return alert("Speech-to-text is not installed on this PC.\n\nInstall it once with:\n" + st.install + "\n\nThen restart AI Studio.");
     if (!E.tl.clips.length) return alert("Add video clips first.");
-    if (!confirm("This exports the movie, then listens to it on this PC (CPU) to write subtitles. The first time it downloads a speech model (about 500 MB). Continue?")) return;
+    if (!confirm(st.note || "This exports the movie, then listens to it on this PC (CPU) to write subtitles. The first time it downloads a speech model (about 500 MB). Continue?")) return;
     status.textContent = "Exporting…";
     await api("timeline", { project: E.projectId, timeline: E.tl });
     let j = await api("export", { project: E.projectId, resolution: "source" });
     while (j.status === "queued" || j.status === "rendering") { await new Promise(r => setTimeout(r, 1500)); j = await api("export/" + j.id); }
     if (j.status !== "done") throw new Error(j.error || "export failed");
-    let s = await api("subtitles", { asset_id: j.asset.id });
+    let s = await api("subtitles", { asset_id: j.asset.id, language: E.subLang || "", size: E.subModel || (window.StudioSubtitles ? "base" : "small") });
     while (!["done", "failed"].includes(s.status)) { status.textContent = "Subtitles: " + s.status + "…"; await new Promise(r => setTimeout(r, 2500)); s = await api("subtitles/" + s.id); }
     if (s.status === "failed") throw new Error(s.error);
     if (!s.segments.length) { status.textContent = "No speech found."; return alert("No speech was found in the movie's sound."); }
     E.tl.texts = E.tl.texts.filter(t => t.kind !== "subtitle");
     for (const g of s.segments) E.tl.texts.push({ id: uid(), text: g.text, start: g.start, dur: Math.max(0.6, g.end - g.start), pos: "bottom", size: 40, color: "white", kind: "subtitle" });
-    changed(); status.textContent = `${s.segments.length} subtitle(s) added (${s.language}). Check the text, then export again.`;
+    changed(); status.textContent = `${s.segments.length} subtitle(s) added (${s.language}). Read them: the speech model can invent words over music or noise, so delete wrong lines, then export again.`;
   }
   const guard = fn => async (...a) => { try { await fn(...a); } catch (e) { err(e); } };
 

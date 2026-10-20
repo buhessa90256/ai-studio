@@ -19,7 +19,11 @@ so keep explanations short and in plain language: what changed, how to see it, n
   `studio/backend.js` (port of the PC's Python modules: assets, characters, projects, scenes, prompts, workflows, models, timeline, character board,
   last frame) and `studio/jobs.js` (RunPod jobs with the app's own `runpod()`, `TOOLS`, `fetchBig`; job log; finished jobs are attached to their scenes
   even if the screen is closed). `studio/export.js` makes the final MP4 in the browser (canvas + WebCodecs + OfflineAudioContext + the vendored
-  `studio/vendor/mp4-muxer.js`, MIT, unmodified). Not available here (need a PC): speech-to-text subtitles and face-similarity checks.
+  `studio/vendor/mp4-muxer.js`, MIT, unmodified). Speech-to-text subtitles work here too (`studio/subtitles.js`: Whisper via transformers.js 3.8.1 + onnxruntime-web, vendored unmodified in
+  `studio/vendor/transformers/`, wasm single-thread because GitHub Pages can't send COOP/COEP; models `Xenova/whisper-base|small` are downloaded from
+  huggingface.co on first use and cached by the browser; the audio never leaves the device; tested: a generated voice line was transcribed exactly).
+  Whisper invents words over music/noise, so the UI tells the user to read the subtitles. Face-similarity checks are PC-only (insightface). Character picker:
+  the Edit image and Video + sound forms have a "Characters" field (`fillCharacters`, `buildParams` in `index.html`; board + description like the PC app).
   The PC app (private repo `ai-studio-pc`, folder `ai-studio-web/`) has copies of the same screens: **change `studio/*.js` here first and copy them to the PC
   app** (the PC copies differ only by `document.getElementById("studio-main") || document.querySelector("main")`).
 
