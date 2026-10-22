@@ -15,10 +15,10 @@ window.__bulkCheck = async function (opts = {}) {
   // ---- recorders (restored in finally)
   const calls = { video: [], use: [], runpod: [], act: [] };
   const orig = { video: SP.sb.video, use: SP.sb.use, runpod: window.runpod, fetch: window.fetch, jobsQueue: window.StudioJobs && StudioJobs.queue, act: localStorage.getItem("connector_act") };
-  let failVideoFor = null, requests = [];
+  let failVideoFor = null, requests = [], PROG = { tool: "minimax_h3" };
   SP.sb.video = async id => { calls.video.push(id); if (failVideoFor === id) throw new Error("no RunPod key"); };
   SP.sb.use = async pid => { calls.use.push(pid); };
-  window.runpod = async (method, path) => { calls.runpod.push(method + " " + path); if (path === "requests") return { requests }; if (String(path).startsWith("status/")) return { id: String(path).slice(7), status: "IN_QUEUE", output: { ai_progress: { tool: "minimax_h3" } } }; if (path === "health") return { jobs: {}, workers: {} }; return {}; };
+  window.runpod = async (method, path) => { calls.runpod.push(method + " " + path); if (path === "requests") return { requests }; if (String(path).startsWith("status/")) return { id: String(path).slice(7), status: "IN_PROGRESS", output: { ai_progress: PROG } }; if (path === "health") return { jobs: {}, workers: {} }; return {}; };
   if (window.StudioJobs) StudioJobs.queue = async () => ({ running: [{ id: "local-job-1" }], recent: [] });
   const ACT = "https://connector.test/act/AAAAAAAAAAAAAAAAAAAAAAAA";
   const actState = { applied: false };
@@ -195,6 +195,25 @@ window.__bulkCheck = async function (opts = {}) {
       ok(/Done\./.test(document.querySelector(".bk-sheet").innerText), "a result summary must be shown");
       document.querySelector(".bk-sheet [class*=pri], .bk-sheet button")?.click();
     }
+    document.querySelectorAll(".bk-sheet").forEach(e => e.remove());
+    // 5b. the dialog shows how far a running job is and can cancel ONLY the waiting jobs (the Scene 11 incident: a job one step from done was cancelled blind)
+    requests = [{ id: "w1", status: "IN_QUEUE" }, { id: "w2", status: "IN_QUEUE" }, { id: "run1", status: "IN_PROGRESS" }];
+    PROG = { tool: "qwen_edit", node_type: "KSampler", nodes_done: 9, nodes_total: 12, elapsed: 1094 };
+    calls.runpod.length = 0; calls.act.length = 0;
+    document.getElementById("bk-stop").click(); await wait(1500);
+    const sh3 = document.querySelector(".bk-sheet");
+    if (ok(sh3, "the dialog must open again")) {
+      ok(/KSampler/.test(sh3.innerText) && /9\/12/.test(sh3.innerText) && /18:14/.test(sh3.innerText), "the dialog must show the running job's stage, steps and elapsed time: " + sh3.innerText.slice(0, 300));
+      ok(/ALMOST DONE/.test(sh3.innerText) && /nearly finished/.test(sh3.innerText), "a job that is >70% done must be flagged ALMOST DONE with a warning");
+      const keepBtn = document.getElementById("bk-cancel-waiting"); ok(keepBtn && /Cancel waiting only \(2\)/.test(keepBtn.textContent), "the 'Cancel waiting only (2)' button must exist: " + (keepBtn && keepBtn.textContent));
+      keepBtn.click(); await wait(1500);
+      const c2 = calls.runpod.filter(c => c.startsWith("POST cancel/")).sort().join();
+      ok(c2 === "POST cancel/w1,POST cancel/w2", "'Cancel waiting only' must cancel exactly the queued jobs and never the running one: " + c2);
+      ok(calls.runpod.filter(c => c === "POST purge-queue").length === 1, "it purges the waiting queue once");
+      ok(!calls.act.some(c => c.op === "cancel_all"), "it must not stop the chat connector's running movie");
+      ok(/left running to finish/.test(document.querySelector(".bk-sheet").innerText), "the result must say the running job was left running");
+    }
+    PROG = { tool: "minimax_h3" };
     document.querySelectorAll(".bk-sheet").forEach(e => e.remove()); localStorage.removeItem("connector_act");
     // settings entry point
     location.hash = "#/settings/gpu"; await wait(2200);

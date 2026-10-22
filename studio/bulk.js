@@ -257,9 +257,10 @@
 
   // ------------------------------------------------------------------ Cancel everything
   async function cancelPreview(ctx) {
-    const out = { local: 0, queued: 0, running: 0, requests: [], chat: null, director: 0, error: "" };
+    const out = { local: 0, queued: 0, running: 0, requests: [], details: [], chat: null, director: 0, error: "" };
     if (isPhoneApp()) {
-      try { const r = await window.runpod("GET", "requests"); out.requests = (r.requests || []).filter(x => ["IN_QUEUE", "IN_PROGRESS"].includes(x.status)); out.queued = out.requests.filter(x => x.status === "IN_QUEUE").length; out.running = out.requests.length - out.queued; } catch (e) { out.error = String(e.message || e); }
+      try { const r = await window.runpod("GET", "requests"); out.requests = (r.requests || []).filter(x => ["IN_QUEUE", "IN_PROGRESS"].includes(x.status)); out.queued = out.requests.filter(x => x.status === "IN_QUEUE").length; out.running = out.requests.length - out.queued;
+        out.details = (await Promise.all(out.requests.filter(x => x.status === "IN_PROGRESS").slice(0, 6).map(async x => { try { const s = await window.runpod("GET", "status/" + x.id), p = (s.output && s.output.ai_progress) || {}; return { id: x.id, node: p.node_type || "", nodes: p.nodes_total ? p.nodes_done + "/" + p.nodes_total : "", elapsed: Math.round(p.elapsed || 0), almost: !!(p.nodes_total && p.nodes_done / p.nodes_total >= 0.7) }; } catch { return null; } }))).filter(Boolean); } catch (e) { out.error = String(e.message || e); }
       try { out.local = ((await window.StudioJobs.queue()).running || []).length; } catch {}
       try { const all = await window.SDB.all("kv"); out.director = all.filter(r => String(r.key).startsWith("director:") && r.value && !r.value.paused && !["DRAFT", "DONE", "CANCELLED"].includes(r.value.state)).length; } catch {}
       if (actLink()) { try { out.chat = await actPost("cancel_all_preview", {}); } catch (e) { out.chat = { error: String(e.message || e) }; } }
@@ -268,13 +269,13 @@
     }
     return out;
   }
-  async function cancelRun(ctx, pv) {
-    const res = { cancelled: 0, failed: 0, purged: null, director: 0, chat: null };
+  async function cancelRun(ctx, pv, keepRunning) {
+    const res = { cancelled: 0, failed: 0, purged: null, director: 0, chat: null, kept: 0 };
     if (isPhoneApp()) {
       try { const all = await window.SDB.all("kv"); for (const r of all) if (String(r.key).startsWith("director:") && r.value && !r.value.paused) { r.value.paused = true; await window.SDB.put("kv", r); res.director++; } } catch {}
-      for (const q of pv.requests) { try { await window.runpod("POST", "cancel/" + q.id); res.cancelled++; } catch (e) { if (/404/.test(String(e.message))) res.cancelled++; else res.failed++; } }
+      for (const q of pv.requests) { if (keepRunning && q.status === "IN_PROGRESS") { res.kept++; continue; } try { await window.runpod("POST", "cancel/" + q.id); res.cancelled++; } catch (e) { if (/404/.test(String(e.message))) res.cancelled++; else res.failed++; } }
       try { res.purged = await window.runpod("POST", "purge-queue"); } catch (e) { res.purged = { error: String(e.message || e).slice(0, 120) }; }
-      if (actLink()) { try { res.chat = await actPost("cancel_all", { confirm: true }); } catch (e) { res.chat = { error: String(e.message || e).slice(0, 120) }; } }
+      if (actLink() && !keepRunning) { try { res.chat = await actPost("cancel_all", { confirm: true }); } catch (e) { res.chat = { error: String(e.message || e).slice(0, 120) }; } }
     } else {
       const r = await (await fetch("/api/cancel_all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) })).json();
       if (r.error) throw new Error(r.error);
@@ -285,33 +286,39 @@
     return res;
   }
   async function cancelEverything(ctx) {
-    const s = sheet(box => box.append(h("h3", {}, "Stop all GPU spending?"), h("p", { class: "bk-mut" }, "Checking what is running…")));
-    let pv; try { pv = await cancelPreview(ctx); } catch (e) { pv = { error: String(e.message || e), requests: [] }; }
-    s.box.replaceChildren(h("h3", {}, "Stop all GPU spending?"),
+    const s = sheet(box => box.append(h("h3", {}, "Stop GPU spending?"), h("p", { class: "bk-mut" }, "Checking what is running…")));
+    let pv; try { pv = await cancelPreview(ctx); } catch (e) { pv = { error: String(e.message || e), requests: [], details: [] }; }
+    const mm = sec => Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0");
+    const almost = (pv.details || []).filter(d => d.almost).length;
+    const finish = async (keepRunning, btns) => {
+      btns.forEach(x => { x.disabled = true; }); const label = keepRunning ? "Cancelling waiting jobs…" : "Cancelling…";
+      try {
+        const r = await cancelRun(ctx, pv, keepRunning), q = r.purged || {};
+        s.box.replaceChildren(h("h3", { class: "bk-ok" }, "Done."), h("ul", { style: "font-size:15px" },
+          h("li", {}, `${r.cancelled} RunPod job(s) cancelled` + (r.failed ? `, ${r.failed} could not be cancelled` : "")),
+          r.kept ? h("li", { class: "bk-ok" }, `${r.kept} running job(s) were left running to finish`) : null,
+          h("li", {}, q.error ? h("span", { class: "bk-bad" }, "Queue: " + q.error) : "RunPod waiting queue cleared"),
+          r.director ? h("li", {}, `${r.director} AI Director production(s) paused`) : null,
+          r.chat && !r.chat.error ? h("li", {}, `Chat connector: ${(r.chat.movies_stopped || []).length} movie(s) stopped, ${r.chat.jobs_cancelled || 0} job(s) cancelled`) : null,
+          r.chat && r.chat.error ? h("li", { class: "bk-warn" }, "Chat connector: " + r.chat.error) : null),
+          h("div", { class: "bk-row" }, h("button", { class: "pri", onclick: s.close }, "Close")));
+        ctx.refresh && ctx.refresh();
+      } catch (e) { btns.forEach(x => { x.disabled = false; }); note(String(e.message || e), "bad"); }
+    };
+    const keep = h("button", { id: "bk-cancel-waiting", disabled: !pv.queued, style: "flex:1.5" }, `Cancel waiting only (${pv.queued || 0})`);
+    const all = h("button", { class: "dng", id: "bk-cancel-all-go", disabled: !!pv.error && !pv.requests.length && !actLink() }, "Cancel everything");
+    keep.onclick = () => finish(true, [keep, all]); all.onclick = () => finish(false, [keep, all]);
+    s.box.replaceChildren(h("h3", {}, "Stop GPU spending?"),
       h("ul", { style: "font-size:15px" },
-        h("li", {}, pv.error ? h("span", { class: "bk-bad" }, "Could not read RunPod: " + pv.error) : [h("b", {}, `${pv.queued} waiting`), ` and `, h("b", {}, `${pv.running} running`), " RunPod job(s) will be cancelled, whoever started them, and the queue is cleared."]),
+        h("li", {}, pv.error ? h("span", { class: "bk-bad" }, "Could not read RunPod: " + pv.error) : [h("b", {}, `${pv.queued} waiting`), ` and `, h("b", {}, `${pv.running} running`), " RunPod job(s), whoever started them."]),
+        (pv.details || []).map(d => h("li", { class: d.almost ? "bk-warn" : "bk-mut", style: "font-size:14px" }, `A running job: ${d.node || "starting"}${d.nodes ? " (" + d.nodes + " steps)" : ""}, running ${mm(d.elapsed)}` + (d.almost ? " — ALMOST DONE" : ""))),
         pv.local ? h("li", {}, `${pv.local} job(s) started on this device are among them.`) : null,
         pv.director ? h("li", {}, `${pv.director} AI Director production(s) will be paused.`) : null,
         pv.chat && !pv.chat.error ? h("li", {}, `Chat connector: ${(pv.chat.active_movies || []).length} running movie(s) and ${(pv.chat.tracked_jobs || []).length} tracked job(s) will be stopped.`) : null,
         pv.chat && pv.chat.error ? h("li", { class: "bk-warn" }, "Chat connector not reached: " + pv.chat.error) : null),
+      almost ? h("p", { class: "bk-warn", style: "font-size:14px" }, `${almost} running job(s) are nearly finished. Cancelling them throws away the GPU time already paid (a cold GPU takes up to ~25 minutes to start). Consider "Cancel waiting only".`) : null,
       h("p", { class: "bk-mut", style: "font-size:13px" }, "Frames, approvals, videos already made, projects and character references are not touched. GPU time already used is not refunded."),
-      h("div", { class: "bk-row" }, h("button", { onclick: s.close }, "Keep going"), (() => {
-        const b = h("button", { class: "dng", disabled: !!pv.error && !pv.requests.length && !actLink(), onclick: async () => {
-          if (b.disabled) return; b.disabled = true; b.textContent = "Cancelling…";
-          try {
-            const r = await cancelRun(ctx, pv), q = r.purged || {};
-            s.box.replaceChildren(h("h3", { class: "bk-ok" }, "Done."), h("ul", { style: "font-size:15px" },
-              h("li", {}, `${r.cancelled} RunPod job(s) cancelled` + (r.failed ? `, ${r.failed} could not be cancelled` : "")),
-              h("li", {}, q.error ? h("span", { class: "bk-bad" }, "Queue: " + q.error) : "RunPod queue cleared"),
-              r.director ? h("li", {}, `${r.director} AI Director production(s) paused`) : null,
-              r.chat && !r.chat.error ? h("li", {}, `Chat connector: ${(r.chat.movies_stopped || []).length} movie(s) stopped, ${r.chat.jobs_cancelled || 0} job(s) cancelled`) : null,
-              r.chat && r.chat.error ? h("li", { class: "bk-warn" }, "Chat connector: " + r.chat.error) : null),
-              h("div", { class: "bk-row" }, h("button", { class: "pri", onclick: s.close }, "Close")));
-            ctx.refresh && ctx.refresh();
-          } catch (e) { b.disabled = false; b.textContent = "Try again"; note(String(e.message || e), "bad"); }
-        } }, "Cancel everything");
-        return b;
-      })()));
+      h("div", { class: "bk-row" }, h("button", { onclick: s.close }, "Keep going"), keep, all));
   }
 
 

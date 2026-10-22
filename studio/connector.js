@@ -37,7 +37,7 @@
     const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago"; };
 
     const base = () => store.get(KEY);
-    const getJ = async p => { const r = await fetch(base() + p); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "connector answered " + r.status); return j; };
+    const getJ = async p => { const r = await fetch(base() + p + (p.includes("?") ? "&" : "?") + "_=" + Date.now(), { cache: "no-store", credentials: "omit" }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "connector answered " + r.status); return j; };
     const download = async u => { const r = await fetch(u); if (!r.ok) throw new Error("download " + r.status); return r.blob(); };
     const addAsset = async (name, blob, type, tags) => api("assets", { filename: name, data: await fileB64(blob), type, tags });
     const slug = s => String(s || "x").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "x";
@@ -144,8 +144,8 @@
     draw();
     window.__connectorSync = () => run(true);
     let one = false;   // live update of ONE chat movie (called every few seconds while its project is open)
-    window.__connectorSyncMovie = async id => { if (one || busy || !base()) return; one = true; try { const n0 = changed; changed = 0; await syncMovie({ id }, (await api("characters")).items); const c = changed; changed = n0; if (c && window.APP) APP.changed("scenes"); } catch (e) { console.warn(e); } finally { one = false; } };
+    window.__connectorSyncMovie = async id => { if (one || busy || !base()) return false; one = true; try { const n0 = changed; changed = 0; await syncMovie({ id }, (await api("characters")).items); const c = changed; changed = n0; if (c && window.APP) APP.changed("scenes"); return true; } catch (e) { console.warn(e); return false; } finally { one = false; } };
     if (base()) setTimeout(() => run(false), 1500);
-    setInterval(() => { if (document.visibilityState === "visible" && base() && Date.now() - last > 60000 && document.getElementById("studio-main")?.offsetParent) run(false); }, 30000);
+    setInterval(() => { if (document.visibilityState === "visible" && base() && Date.now() - last > 300000) run(false); }, 60000);
   }
 })();
