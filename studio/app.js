@@ -4,6 +4,12 @@
 (() => {
   if (!window.SP) return;
   const { api, h } = window.SP;
+  // DOM append/prepend/replaceChildren turn null/undefined into the text "null" and arrays into "[object ...]": make them skip empty values and flatten lists,
+  // so a missing optional element never shows up as raw text anywhere in the app.
+  for (const name of ["append", "prepend", "replaceChildren"]) for (const proto of [Element.prototype, DocumentFragment.prototype]) {
+    const orig = proto[name]; if (!orig || orig.__safe) continue;
+    const safe = function (...kids) { return orig.apply(this, kids.flat(Infinity).filter(k => k != null && k !== false)); }; safe.__safe = true; proto[name] = safe;
+  }
   const LS = { get: (k, d = null) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
   const listeners = {};
   const APP = window.APP = {
