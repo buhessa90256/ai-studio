@@ -45,7 +45,7 @@
       const shown = projects.filter(p => !q || (p.name || "").toLowerCase().includes(q)).filter(p => listFilter === "all" || (listFilter === "active" ? !(scenesBy[p.id] || []).length || APP.pipeline(scenesBy[p.id]).vids < (scenesBy[p.id] || []).length : APP.pipeline(scenesBy[p.id] || []).vids === (scenesBy[p.id] || []).length && (scenesBy[p.id] || []).length));
       const search = h("input", { class: "ds-input", placeholder: "Search projects", value: listQ, "aria-label": "Search projects" }); search.oninput = () => { listQ = search.value; clearTimeout(list.t); list.t = setTimeout(() => list(++token), 250); };
       const seg = h("div", { class: "ds-seg" }, [["active", "In progress"], ["done", "Finished"], ["all", "All"]].map(([k, l]) => h("button", { type: "button", class: listFilter === k ? "on" : "", onclick: () => { listFilter = k; list(++token); } }, l)));
-      rootEl.replaceChildren(h("div", { class: "hm-hero" }, h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`), h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project")),
+      rootEl.replaceChildren(h("div", { class: "hm-hero" }, h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`), h("div", { class: "ds-row" }, h("button", { class: "ds-btn", onclick: deletedSheet }, "Recently deleted"), h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project"))),
         h("div", { class: "ds-row ds-wrap", style: "margin:14px 0" }, h("div", { class: "ds-grow", style: "min-width:200px" }, search), seg),
         shown.length ? h("div", { class: "ds-grid wide" }, shown.map(p => APP.projectCard(p, scenesBy[p.id] || [], APP.pipeline(scenesBy[p.id] || []))))
           : h("div", { class: "ds-empty" }, icon("film"), h("b", {}, projects.length ? "No projects match" : "No projects yet"), projects.length ? "Try another filter or search." : "A project holds your scenes, start frames, videos and the final edit.", projects.length ? null : h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, "Create your first project")));
@@ -92,13 +92,14 @@
       const ae = document.activeElement; if (!force && ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && rootEl.contains(ae)) { ws.sig = sig; updateStrip(); return; }   // editing a field: keep the selected scene and the cursor
       ws.sig = sig; const y = window.scrollY; draw(); window.scrollTo(0, y);
     }
-    function startPoll() {   // while the workspace is open: every 5 s when work is running, every 15 s otherwise; paused while the tab is hidden
+    function startPoll() {   // while the workspace is open: every 2 s (cheap: it only redraws when something visible changed); paused while the tab is hidden
       stopPoll(); let n = 0;
       poll = setInterval(() => {
         if (document.visibilityState !== "visible" || !ws || host.hidden) return; n++;
         const busy = ws.scenes.some(s => APP.sceneInfo(s).busy) || (ws.kickUntil || 0) > Date.now();
-        if (busy || n % 3 === 0) { refresh().catch(() => {}); if (APP.refreshGpu) APP.refreshGpu().then(updateStrip).catch(() => {}); }
-      }, 5000);
+        refresh().catch(() => {}); if (n % 4 === 0 && APP.refreshGpu) APP.refreshGpu().then(updateStrip).catch(() => {});
+        const cid = ws.project && ws.project.data && ws.project.data.connector_id; if (cid && n % 2 === 0 && window.__connectorSyncMovie) window.__connectorSyncMovie(cid);   // chat movies: pull the newest state from the connector
+      }, 2000);
     }
     function stopPoll() { if (poll) clearInterval(poll); poll = null; }
     function pick(id) { ws.sceneId = id; APP.state.sceneId = id; history.replaceState(null, "", `#/projects/${ws.pid}/${ws.mode}/${id}`); draw(); }
@@ -333,19 +334,20 @@
       [1500, 4000, 9000].forEach(ms => setTimeout(() => refresh().catch(() => {}), ms));
       return p;
     }
+    const viaChat = sc => !!(sc.settings && sc.settings.cm) && !!APP.LS.get("connector_act", "");   // chat frames are decided in the chat only when the actions link was added; otherwise this app decides (locally)
     const actions = {
       async addScene() { try { const s = await api("scenes", { project_id: ws.pid, title: "New scene", characters: ws.project.characters }); ws.sceneId = s.id; APP.changed("scenes"); await refresh(); } catch (e) { APP.fail(e, "Could not add the scene"); } },
       async plan() { await window.SP.sb.use(ws.pid); window.SP.sb.planDialog(); },
       async importScenes() { await window.SP.sb.use(ws.pid); window.SP.sb.importDialog(); },
       async frame(sc) {
-        if (sc.settings && sc.settings.cm) return APP.chatAct("regenerate", sc, ws.project);
+        if (viaChat(sc)) return APP.chatAct("regenerate", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!(await APP.confirm(info.hasFrame ? "Make a new start frame?" : "Make the start frame?", `Uses the GPU (about ${APP.money(APP.estimate(sc, "frame"))} of RunPod credit).${info.hasFrame ? " The current frame stays in Frame versions." : ""}${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "frame")) : ""}${APP.gpu.state === "asleep" ? "\nThe GPU is asleep and needs about 5 minutes to wake." : ""}`, "Generate"))) return;
         kick("frame:" + sc.id, "Start frame", async () => { await window.SP.sb.use(ws.pid); await window.SP.sb.frame(sc.id); });
         APP.toast("Making the start frame. You can leave this page; it keeps going.", "ok");
       },
       async video(sc) {
-        if (sc.settings && sc.settings.cm) return APP.chatAct("approve", sc, ws.project);
+        if (viaChat(sc)) return APP.chatAct("approve", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!info.approved) return APP.toast("Approve the start frame first.");
         if (!(await APP.confirm("Make the video?", `Uses the GPU for about 7 minutes (about ${APP.money(APP.estimate(sc, "clip"))} of RunPod credit). This only starts because you pressed Generate.${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "clip")) : ""}`, "Generate video"))) return;
@@ -353,16 +355,27 @@
         APP.toast("Making the video (about 7 minutes). You can leave this page; it keeps going.", "ok");
       },
       async approve(sc) {
-        if (sc.settings && sc.settings.cm) return APP.chatAct("approve", sc, ws.project);
-        try { await APP.saveScene(sc, { settings: { ...(sc.settings || {}), review: "approved", approved_at: Date.now() / 1000 } }); APP.toast("Frame approved. Nothing is generated until you press Generate video.", "ok"); await refresh(); } catch (e) { APP.fail(e); }
+        if (viaChat(sc)) return APP.chatAct("approve", sc, ws.project);
+        try { await APP.saveScene(sc, { settings: { ...(sc.settings || {}), review: "approved", approved_at: Date.now() / 1000, approved_asset: sc.start_asset } }); APP.toast("Frame approved" + (sc.settings && sc.settings.cm ? " in this app (the chat movie itself is unchanged)" : "") + ". Nothing is generated until you press Make video.", "ok"); await refresh(true); } catch (e) { APP.fail(e); }
       },
       async reject(sc) {
-        if (sc.settings && sc.settings.cm) return APP.chatAct("reject", sc, ws.project);
-        try { await APP.saveScene(sc, { settings: { ...(sc.settings || {}), review: "rejected" } }); await refresh(); APP.toast("Frame rejected. Generate a new one when you are ready."); } catch (e) { APP.fail(e); }
+        if (viaChat(sc)) return APP.chatAct("reject", sc, ws.project);
+        try { await APP.saveScene(sc, { settings: { ...(sc.settings || {}), review: "rejected" } }); await refresh(true); APP.toast("Frame rejected. Generate a new one when you are ready."); } catch (e) { APP.fail(e); }
       },
       async cancel(sc) { if (await APP.confirm("Cancel this job?", "GPU time already used is not refunded.", "Cancel job", true)) { try { await fetch("/api/cancel/" + sc.job_id, { method: "POST" }); APP.toast("Cancelling…"); setTimeout(refresh, 1500); } catch (e) { APP.fail(e); } } },
     };
     APP.wsActions = actions;
+    async function deleteProject(p) {
+      const n = (ws && ws.pid === p.id ? ws.scenes.length : 0);
+      if (!(await APP.confirm("Delete this project?", `\u201c${txt(p.name, "Untitled")}\u201d${n ? " and its " + n + " scene" + (n === 1 ? "" : "s") : ""} will be removed from your projects. Pictures, videos and characters stay in the Library, and you can restore the project from \u201cRecently deleted\u201d.`, "Delete project", true))) return;
+      try { await api("projects/" + p.id + "/delete", {}); stopPoll(); ws = null; APP.changed("all"); APP.toast("Project deleted. You can restore it from Projects \u2192 Recently deleted.", "ok"); APP.go("/projects"); } catch (e) { APP.fail(e, "Could not delete the project"); }
+    }
+    APP.deleteProject = deleteProject;
+    async function deletedSheet() {
+      const gone = (await api("projects?deleted=1")).items || [];
+      APP.sheet((box, close) => box.append(h("h2", { class: "ds-h2", style: "font-size:17px;margin-bottom:10px" }, "Recently deleted"), gone.length ? h("div", { class: "ds-stack", style: "gap:8px" }, gone.map(p => h("div", { class: "ds-row ds-between", style: "gap:8px" }, h("div", { class: "ds-grow", style: "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, txt(p.name, "Untitled")),
+        h("button", { class: "ds-btn sm", onclick: async () => { try { await api("projects/" + p.id + "/restore", {}); APP.changed("all"); close(); APP.toast("Project restored.", "ok"); } catch (e) { APP.fail(e); } } }, "Restore")))) : h("p", { class: "ds-sub" }, "Nothing here."), h("button", { class: "ds-btn", style: "width:100%;margin-top:12px", onclick: close }, "Close")));
+    }
     function projectMenu() {
       const p = ws.project, sc = cur();
       APP.sheet((box, close) => box.append(h("h2", { class: "ds-h2", style: "font-size:17px;margin-bottom:10px" }, txt(p.name, "Project")), h("div", { class: "ds-stack", style: "gap:8px" },
@@ -370,6 +383,7 @@
         sc ? h("button", { class: "ds-btn", onclick: async () => { close(); try { await api(`scenes/${sc.id}/duplicate`, {}); APP.changed("scenes"); await refresh(); } catch (e) { APP.fail(e); } } }, "Duplicate this scene") : null,
         sc ? h("button", { class: "ds-btn", onclick: async () => { close(); const i = ws.scenes.indexOf(sc), ids = ws.scenes.map(s => s.id); if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; await api("scenes/reorder", { project: ws.pid, ids }); APP.changed("scenes"); await refresh(); } } }, "Move scene earlier") : null,
         h("button", { class: "ds-btn", onclick: () => { close(); window.SP.editProject(p, () => { APP.changed("projects"); refresh(); }); } }, "Project settings"),
+        h("button", { class: "ds-btn bad", onclick: () => { close(); deleteProject(p); } }, icon("x"), "Delete project"),
         sc ? h("button", { class: "ds-btn bad", onclick: async () => { close(); if (await APP.confirm("Delete this scene?", "Its frames and video stay in the Library.", "Delete", true)) { try { await api(`scenes/${sc.id}/delete`, {}); APP.changed("scenes"); await refresh(); } catch (e) { APP.fail(e); } } } }, "Delete this scene") : null)));
     }
     // keyboard: scene navigation, approve, regenerate (desktop)

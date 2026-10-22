@@ -29,6 +29,19 @@
         return out;
       };
       let hs = seams(H, W, (i, j) => gray[i * W + j]), vs = seams(W, H, (i, j) => gray[j * W + i]);
+      const bands = (len, across, at) => {   // thin DARK separator lines between panels of a dark picture: a line much darker than the rows around it
+        const m = new Float32Array(len); for (let i = 0; i < len; i++) { let t = 0; for (let j = 0; j < across; j += 2) t += at(i, j); m[i] = t / Math.ceil(across / 2); }
+        const out = [];
+        for (let i = Math.round(0.08 * len); i < Math.round(0.92 * len); i++) {
+          const dip = Math.min(m[i], m[Math.min(len - 1, i + 1)], m[Math.max(0, i - 1)]), nb = []; for (const k of [-14, -11, -8, 8, 11, 14]) if (m[i + k] != null) nb.push(m[i + k]); nb.sort((a, b) => a - b);
+          const med = nb.length ? nb[nb.length >> 1] : 0;
+          const near = [0.25, 1 / 3, 0.5, 2 / 3, 0.75].some(f => Math.abs(i / len - f) <= 0.03); if (near ? (dip < 14 && med > 4 && dip < 0.65 * med) : (dip < 14 && med > 9 && dip < 0.4 * med)) { const p = i / len; if (!out.length || p - out[out.length - 1] > 0.03) out.push(p); }
+        }
+        return out;
+      };
+      if (H >= W) for (const p of bands(H, W, (i, j) => gray[i * W + j])) if (!hs.some(q => Math.abs(q - p) < 0.025)) hs.push(p);
+      if (W > H) for (const p of bands(W, H, (i, j) => gray[j * W + i])) if (!vs.some(q => Math.abs(q - p) < 0.025)) vs.push(p);
+      hs.sort((a, b) => a - b); vs.sort((a, b) => a - b);
       if (hs.length + vs.length === 1) { const p = (hs[0] ?? vs[0]); if (![0.25, 1 / 3, 0.5, 2 / 3, 0.75].some(f => Math.abs(p - f) <= 0.04)) { hs = []; vs = []; } }
       let panels = (hs.length + 1) * (vs.length + 1), repeat = null;
       {   // the same picture repeated in equal parts (halves, thirds, quarters): neighbouring parts have almost the same edge structure
@@ -96,7 +109,7 @@
         box.replaceChildren(...rows);
       }
       function paint() {
-        const v = versions[sel], i = info(), n = project && (ctx.scenes || []).indexOf(sc) + 1;
+        const v = versions[sel], i = info(), n = project && ((ctx.scenes || []).findIndex(x => x.id === sc.id) + 1);
         tf = { s: 1, x: 0, y: 0 };
         const close_ = h("button", { class: "ds-btn icon sm", "aria-label": "Close", onclick: close }, icon("x"));
         const top = h("div", { class: "rv-top" }, close_, h("div", { class: "ds-grow" }, h("div", { class: "ds-h2" }, `Scene ${n || ""} · review`), h("div", { class: "ds-small" }, `${/^scene \d+$/i.test(txt(sc.title).trim()) ? "" : txt(sc.title) + " · "}${project.aspect} · ${v.label}${v.current ? " (current)" : ""}`)),
@@ -116,7 +129,7 @@
         const prompt = h("details", { class: "ws-sec" }, h("summary", {}, "Scene description"), h("div", { class: "in" }, h("div", { class: "ds-sub" }, txt(sc.action, "No description"))));
         const refs = (ctx.chars || []).length ? null : null;
         const side = h("div", { class: "rv-side" }, h("div", { class: "ds-h2" }, "Automatic checks"), checks, prompt, h("div", { class: "ds-small" }, v.current ? "This is the version the video would start from." : "An older version. Restoring it makes it the current frame."), !v.current && v.id ? h("button", { class: "ds-btn sm", onclick: async () => { if (!(await APP.confirm("Restore " + v.label + "?", "It becomes the start frame again (the current one stays in the versions).", "Restore"))) return; try { const hist = ((sc.settings || {}).frame_history || []).slice(); const cur = sc.start_asset; if (cur && !hist.some(x => x.asset === cur)) hist.push({ v: hist.length + 1, asset: cur, at: Date.now() / 1000 }); await APP.saveScene(sc, { start_asset: v.id, settings: { ...(sc.settings || {}), frame_history: hist, review: "" } }); close(); ctx.refresh && ctx.refresh(); APP.toast("Restored " + v.label + ".", "ok"); } catch (e) { APP.fail(e); } } }, "Restore this version") : null);
-        const a = ctx.actions || APP.wsActions, closeThen = fn => async () => { close(); await fn(sc); };
+        const a = ctx.actions || APP.wsActions, closeThen = fn => async () => { try { await fn(sc); } finally { close(); } };   // the action (and its confirmation) comes first, so nothing is hidden behind this screen
         const acts = h("div", { class: "rv-actions" }, i.busy ? h("button", { class: "ds-btn", disabled: true }, "Generating…") : [
           h("button", { class: "ds-btn bad", onclick: closeThen(a.reject) }, "Reject"), h("button", { class: "ds-btn", onclick: closeThen(a.frame) }, icon("refresh"), "Regenerate"),
           i.approved && !i.hasVideo ? h("button", { class: "ds-btn pri", onclick: closeThen(a.video) }, icon("play"), "Generate video") : h("button", { class: "ds-btn ok", disabled: !v.current, onclick: closeThen(a.approve) }, icon("check"), i.approved ? "Approved" : "Approve")]);

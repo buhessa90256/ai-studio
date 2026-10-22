@@ -83,6 +83,7 @@
       if (d.error || !d.scenes) return;
       const aspect = d.aspect || "16:9";
       const projects = (await api("projects")).items;
+      if (((await api("projects?deleted=1")).items || []).some(x => x.data && x.data.connector_id === d.movie_id)) return;   // deleted by the user: stays deleted
       let p = projects.find(x => x.data && x.data.connector_id === d.movie_id);
       const data = { ...(p ? p.data : {}), connector_id: d.movie_id, connector_status: d.status, connector_step: d.current_step || "" };
       if (!p) { p = await api("projects", { name: "Chat: " + d.title, aspect, resolution: aspect === "9:16" ? "768x1344" : aspect === "1:1" ? "1024x1024" : "1344x768", description: "Made in the chat connector", data, folder: "From chat" }); changed++; }
@@ -142,6 +143,8 @@
     }
     draw();
     window.__connectorSync = () => run(true);
+    let one = false;   // live update of ONE chat movie (called every few seconds while its project is open)
+    window.__connectorSyncMovie = async id => { if (one || busy || !base()) return; one = true; try { const n0 = changed; changed = 0; await syncMovie({ id }, (await api("characters")).items); const c = changed; changed = n0; if (c && window.APP) APP.changed("scenes"); } catch (e) { console.warn(e); } finally { one = false; } };
     if (base()) setTimeout(() => run(false), 1500);
     setInterval(() => { if (document.visibilityState === "visible" && base() && Date.now() - last > 60000 && document.getElementById("studio-main")?.offsetParent) run(false); }, 30000);
   }

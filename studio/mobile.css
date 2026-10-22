@@ -169,3 +169,19 @@ html[data-ui="v2"] #v-studio .dir-in textarea, html[data-ui="v2"] .dir-sheetwrap
 
 @media (max-width: 460px) { .dir-steps { display: none; } .dir-send { width: 48px; padding: 0; } .dir-send .lbl { display: none; } .dir-bar { padding: 6px 10px; gap: 6px; } .dir-in { gap: 6px; padding-left: 8px; padding-right: 8px; } .dir-in textarea { padding: 10px; } }
 .dir-in .ds-btn { min-height: 44px; align-self: flex-end; }
+
+/* ---- layers: confirmations and toasts are ALWAYS above the review screen and the viewer (they used to open underneath it, so buttons seemed to do nothing) */
+.ds-sheet { z-index: 500; } .ds-toast-host { z-index: 600; }
+/* ---- review screen on phones */
+@media (max-width: 640px) {
+  .rv-top { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto auto; grid-template-areas: "x t z c f" "x p p p p"; gap: 4px 6px; align-items: center; padding: calc(8px + var(--sat)) calc(10px + var(--sar)) 8px calc(10px + var(--sal)); }
+  .rv-top > :nth-child(1) { grid-area: x; } .rv-top > :nth-child(2) { grid-area: t; min-width: 0; } .rv-top > :nth-child(3) { grid-area: p; justify-self: start; } .rv-top > :nth-child(4) { grid-area: z; } .rv-top > :nth-child(5) { grid-area: c; } .rv-top > :nth-child(6) { grid-area: f; }
+  .rv-top .ds-h2 { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .rv-top .ds-small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rv-top .ds-btn.icon, .rv-top .ds-btn.icon.sm { width: 44px; min-width: 44px; height: 44px; }
+  .rv-main { grid-template-rows: minmax(0, 52%) minmax(0, 1fr); }
+  .rv-actions { display: grid; grid-template-columns: 1fr 1fr 1.5fr; gap: 8px; padding: 8px calc(10px + var(--sar)) calc(8px + var(--sab)) calc(10px + var(--sal)); }
+  .rv-actions .ds-btn { min-width: 0; min-height: 48px; padding: 0 6px; font-size: 14px; gap: 5px; white-space: nowrap; }
+  .rv-actions .ds-btn[disabled] { grid-column: 1 / -1; }
+  .rv-side { padding: 10px 12px; } .rv-vers { padding: 6px 12px; }
+}
+@media (max-width: 359px) { .rv-actions .ds-btn svg { display: none; } }

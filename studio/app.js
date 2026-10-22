@@ -53,8 +53,8 @@
   };
   APP.confirm = (title, body, okLabel = "Continue", danger = false) => new Promise(res => {
     APP.sheet((box, close) => box.append(h("h2", { class: "ds-h2", style: "font-size:17px;margin-bottom:6px" }, title), h("p", { class: "ds-sub", style: "margin:0 0 16px;white-space:pre-line" }, body),
-      h("div", { class: "ds-row" }, h("button", { class: "ds-btn ghost", style: "flex:1", onclick: () => { close(); res(false); } }, "Cancel"),
-        h("button", { class: "ds-btn " + (danger ? "bad" : "pri"), style: "flex:1", onclick: () => { close(); res(true); } }, okLabel))), { onClose: () => res(false) });
+      h("div", { class: "ds-row" }, h("button", { class: "ds-btn ghost", style: "flex:1", onclick: () => { res(false); close(); } }, "Cancel"),
+        h("button", { class: "ds-btn " + (danger ? "bad" : "pri"), style: "flex:1", onclick: () => { res(true); close(); } }, okLabel))), { onClose: () => res(false) });
   });
   // one action at a time per key (prevents double taps from starting paid work twice)
   const running = new Set();
@@ -144,6 +144,17 @@
     return spent + cost > lim ? " Heads up: this would pass your daily limit of " + APP.money(lim) + " (" + APP.money(spent) + " spent today on this device)." : "";
   };
   // ------------------------------------------------------------------ selection (kept in sync with the old screens through the shared localStorage key)
+  {   // live refresh: compare a cheap fingerprint of projects + scenes every 2 s while the page is visible; no manual reload needed
+    let last = "";
+    setInterval(async () => {
+      if (document.visibilityState !== "visible" || !window.SDB) return;
+      try {
+        const [p, s] = await Promise.all([SDB.all("projects"), SDB.all("scenes")]);
+        const sig = p.map(x => x.id + x.updated + (x.deleted ? "d" : "")).join() + "|" + s.map(x => x.id + x.status + x.start_asset + x.video_asset + x.updated).join();
+        if (last && sig !== last) APP.changed("all"); last = sig;
+      } catch {}
+    }, 2000);
+  }
   APP.syncNow = () => (window.__connectorSync ? window.__connectorSync() : Promise.resolve());
   APP.select = (pid, sceneId) => { APP.state.projectId = pid || ""; APP.state.sceneId = sceneId || ""; LS.set("sb_project", pid || ""); APP.emit("select", APP.state); };
 })();
