@@ -56,7 +56,7 @@
       const withFrame = scenes.find(s => s.start_asset_url), cover = p.cover_url || (withFrame && withFrame.start_asset_url) || "";
       const pend = scenes.filter(s => APP.sceneInfo(s, p).key === "review").length;
       const t = h("div", { class: "ds-thumb" }, cover ? h("img", { src: cover, loading: "lazy", alt: "" }) : icon("film"));
-      return h("div", { class: "ds-card tap pj-card" + (APP.isPortrait(p.aspect) ? " portrait" : ""), role: "button", tabindex: 0, onclick: () => APP.go("/projects/" + p.id + "/ai"), onkeydown: e => { if (e.key === "Enter") APP.go("/projects/" + p.id + "/ai"); } }, t,
+      return h("div", { class: "ds-card tap pj-card" + (APP.isPortrait(p.aspect) ? " portrait" : ""), role: "button", tabindex: 0, onclick: () => APP.go("/projects/" + p.id), onkeydown: e => { if (e.key === "Enter") APP.go("/projects/" + p.id); } }, t,
         h("div", { class: "in" }, h("div", { class: "ds-row ds-between" }, h("b", {}, APP.txt(p.name, "Untitled project")), h("span", { class: "ds-pill" }, p.aspect)),
           h("div", { class: "ds-bar" }, h("i", { style: `width:${pl.n ? Math.round(100 * (pl.vids + pl.frames) / (2 * pl.n)) : 0}%` })),
           h("div", { class: "ds-row ds-wrap" }, h("span", { class: "ds-small" }, pl.n ? `${pl.frames}/${pl.n} frames · ${pl.vids}/${pl.n} videos` : "No scenes yet"), pend ? h("span", { class: "ds-pill warn" }, pend + " to review") : null)));
@@ -72,7 +72,7 @@
           h("div", { class: "ds-row" }, h("button", { class: "ds-btn ghost", style: "flex:1", onclick: close }, "Cancel"), h("button", { class: "ds-btn pri", style: "flex:1", onclick: async () => {
             if (!name.value.trim()) { name.focus(); return APP.toast("Give the project a name."); }
             const a = aspect.querySelector(".on").dataset.a;
-            try { const p = await APP.saveProject({}, { name: name.value.trim(), aspect: a, resolution: a === "9:16" ? "768x1344" : a === "1:1" ? "1024x1024" : "1344x768", duration: 30, characters: [...picked], story: "", description: "", data: {} }); close(); APP.go("/projects/" + p.id + "/ai"); } catch (e) { APP.fail(e, "Could not create the project"); } } }, "Create"))));
+            try { const p = await APP.saveProject({}, { name: name.value.trim(), aspect: a, resolution: a === "9:16" ? "768x1344" : a === "1:1" ? "1024x1024" : "1344x768", duration: 30, characters: [...picked], story: "", description: "", data: {} }); close(); APP.go("/projects/" + p.id); } catch (e) { APP.fail(e, "Could not create the project"); } } }, "Create"))));
       });
     }
     APP.newProject = newProject;

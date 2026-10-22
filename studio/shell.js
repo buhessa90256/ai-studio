@@ -38,7 +38,7 @@
     // --- routes: #/home  #/projects  #/projects/<id>[/<mode>[/<sceneId>]]  #/library[/<filter>]  #/settings[/<section>]
     function route() {
       const parts = (location.hash || "#/home").slice(2).split("/").filter(Boolean), top = parts[0] || "home";
-      if (top === "projects") { APP.state.projectId = parts[1] || ""; APP.state.mode = parts[2] || "ai"; APP.state.sceneId = parts[3] || ""; APP.state.review = parts[4] === "review"; if (parts[1]) APP.LS.set("sb_project", parts[1]); window.show("studio"); APP.emit("route", APP.state); }
+      if (top === "projects") { APP.state.projectId = parts[1] || ""; APP.state.mode = parts[2] || ""; APP.state.sceneId = parts[3] || ""; APP.state.review = parts[4] === "review"; if (parts[1]) APP.LS.set("sb_project", parts[1]); window.show("studio"); APP.emit("route", APP.state); }
       else if (top === "library") { APP.state.libFilter = parts[1] || "characters"; window.show("library"); APP.emit("route", APP.state); }
       else if (top === "settings") { APP.state.setSection = parts[1] || ""; window.show("settings"); APP.emit("route", APP.state); }
       else if (top === "create") window.show("home");

@@ -48,13 +48,13 @@
 
     function createChat(pid) {
       const root = h("section", { class: "dir-chat", "aria-label": "AI Director chat" }), list = h("div", { class: "dir-list", role: "log", "aria-live": "polite" }), bar = h("div", { class: "dir-bar" }), steps = h("div", { class: "dir-steps" });
-      const ta = h("textarea", { rows: 1, placeholder: "Describe your movie, or tell me what to change…", "aria-label": "Message to AI Director", enterkeyhint: "send" }), file = h("input", { type: "file", accept: "image/*", hidden: true });
+      const ta = h("textarea", { rows: 1, placeholder: "Message…", "aria-label": "Message to AI Director", enterkeyhint: "send" }), file = h("input", { type: "file", accept: "image/*", hidden: true });
       let busy = false;
       const send = async () => {
         const t = ta.value.trim(); if (!t || busy) return; busy = true; ta.value = ""; ta.style.height = ""; sendBtn.disabled = true;
         try { await DIR.handleUser(pid, t, []); } finally { busy = false; sendBtn.disabled = false; }
       };
-      const sendBtn = h("button", { class: "ds-btn pri", type: "button", onclick: send }, "Send");
+      const sendBtn = h("button", { class: "ds-btn pri dir-send", type: "button", "aria-label": "Send message", onclick: send }, icon("up"), h("span", { class: "lbl" }, "Send"));
       ta.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } }; ta.oninput = () => { ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; };
       file.onchange = async () => {
         const f = file.files[0]; if (!f) return; try {

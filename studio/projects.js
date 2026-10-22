@@ -8,15 +8,27 @@
     const { h, icon, txt, api } = APP;
     const host = document.getElementById("v-studio"), legacy = document.getElementById("studio-main");
     const rootEl = h("div", { id: "ws-root" }); host.insertBefore(rootEl, host.firstChild);
-    const MODES = [["storyboard", "Storyboard"], ["director", "Director"], ["editor", "Editor"], ["automation", "Automation"]];
+    const SECTIONS = [["storyboard", "Storyboard"], ["scenes", "Scenes"], ["characters", "Characters"], ["videos", "Videos"], ["settings", "Settings"]];
+    const ALIAS = { director: ["settings", "look"], editor: ["videos", "editor"], automation: ["settings", "studioflows"], manual: ["", ""] };   // older links keep working
     let ws = null, token = 0, poll = null, listFilter = "active", listQ = "";
 
     // ------------------------------------------------------------------ routing
+    // Which workspace opens: an explicit link wins; otherwise the mode/section remembered for THIS project; first time = Manual Editor (Storyboard). AI Director is never chosen for the user.
+    function resolveMode(pid, raw) {
+      let sec = raw || "", sub = "";
+      if (ALIAS[sec]) [sec, sub] = ALIAS[sec];
+      if (!sec) sec = APP.LS.get("ws_mode:" + pid, "manual") === "ai" ? "ai" : APP.LS.get("ws_sec:" + pid, "storyboard");
+      if (sec !== "ai" && !SECTIONS.some(x => x[0] === sec)) sec = "storyboard";
+      APP.LS.set("ws_mode:" + pid, sec === "ai" ? "ai" : "manual"); if (sec !== "ai") APP.LS.set("ws_sec:" + pid, sec);
+      if (SUBS_DEFAULT[sec]) sub = sub || APP.LS.get(`ws_sub:${pid}:${sec}`, SUBS_DEFAULT[sec]);
+      return [sec, sub];
+    }
+    const SUBS_DEFAULT = { videos: "clips", settings: "look" };
     async function renderRoute() {
       if (document.getElementById("v-studio").hidden) return;
       const my = ++token, { projectId, mode, sceneId } = APP.state;
       legacy.style.display = "none"; legacy.classList.remove("ws-legacy");
-      try { if (!projectId) { stopPoll(); ws = null; return await list(my); } await workspace(projectId, mode === "ai" || MODES.some(m => m[0] === mode) ? mode : "ai", sceneId, my); }
+      try { if (!projectId) { stopPoll(); ws = null; return await list(my); } { const [sec, sub] = resolveMode(projectId, mode); await workspace(projectId, sec, sceneId, my, sub); } }
       catch (e) { if (my === token) { rootEl.replaceChildren(h("div", { class: "ds-empty" }, icon("warn"), h("b", {}, "Could not open this"), APP.txt(e.message, "Unknown error"), h("button", { class: "ds-btn", onclick: () => APP.go("/projects") }, "Back to projects"))); APP.fail(e); } }
     }
     APP.on("route", () => { if (location.hash.startsWith("#/projects")) renderRoute(); });
@@ -40,62 +52,167 @@
     }
 
     // ------------------------------------------------------------------ workspace
-    async function workspace(pid, mode, sceneId, my) {
+    async function workspace(pid, mode, sceneId, my, sub) {
       const first = !ws || ws.pid !== pid;
       if (first) rootEl.replaceChildren(h("div", { class: "ds-stack" }, h("div", { class: "ds-skel", style: "height:40px" }), h("div", { class: "ds-skel", style: "height:60vh" })));
       const [project, scenes, chars] = await Promise.all([APP.project(pid), APP.scenes(pid, true), APP.chars()]);
       if (my !== token) return;
       if (!project) throw new Error("This project no longer exists on this device.");
       const keep = ws && ws.pid === pid ? ws : { view: "frame" };
-      ws = Object.assign(keep, { pid, project, scenes, chars, mode });
+      ws = Object.assign(keep, { pid, project, scenes, chars, mode, sub: sub || "" }); ws.sig = sigOf();
       ws.sceneId = scenes.some(s => s.id === sceneId) ? sceneId : (scenes.some(s => s.id === ws.sceneId) ? ws.sceneId : (scenes[0] || {}).id || "");
       APP.state.sceneId = ws.sceneId; APP.LS.set("sb_project", pid);
       draw(); startPoll();
       if (APP.state.review && ws.sceneId) { APP.state.review = false; const sc = scenes.find(s => s.id === ws.sceneId); if (sc) APP.openReview(sc, project, ctx()); }
     }
-    // AI Director chat: one node per project, reused by every redraw (so typing and scroll position survive); full size in AI mode, a collapsible dock in Manual mode
+    // ------------------------------------------------------------------ chat (AI Director): one node per project, reused by every redraw; full size in AI mode, a bottom sheet in Manual mode
     function chatNode() {
       if (!window.DIR || !DIR.createChat) { document.addEventListener("dir-ui-ready", () => { if (ws) draw(); }, { once: true }); return h("div", { class: "ds-empty" }, "AI Director is loading…"); }
       if (!ws.chat || ws.chatPid !== ws.pid) { if (ws.chat && ws.chat.destroy) ws.chat.destroy(); ws.chat = DIR.createChat(ws.pid); ws.chatPid = ws.pid; }
       return ws.chat;
     }
-    function dock(chat) {
-      const open = !!ws.dockOpen, wrap = h("div", { class: "dir-dock" + (open ? " open" : "") }, h("button", { type: "button", class: "dir-dock-h", "aria-expanded": open, onclick: () => { ws.dockOpen = !ws.dockOpen; wrap.classList.toggle("open", ws.dockOpen); hd.setAttribute("aria-expanded", ws.dockOpen); } }, icon("film"), "AI Director", h("span", { class: "ds-small", style: "margin-left:auto" }, open ? "Hide" : "Ask the director…")));
-      const hd = wrap.firstChild; wrap.append(h("div", { class: "dir-dock-b" }, chat)); return wrap;
+    function chatSheet() {
+      const chat = chatNode(); chat.classList.remove("compact");
+      const wrap = h("div", { class: "dir-sheetwrap", role: "dialog", "aria-modal": "true", "aria-label": "AI Director" }), box = h("div", { class: "box" });
+      const close = () => { wrap.remove(); document.removeEventListener("keydown", esc); };
+      const esc = e => { if (e.key === "Escape") close(); };
+      box.append(h("div", { class: "hd" }, "AI Director", h("button", { class: "ds-btn icon ghost", "aria-label": "Close chat", onclick: close }, icon("x"))), chat);
+      wrap.onclick = e => { if (e.target === wrap) close(); }; wrap.append(box); document.addEventListener("keydown", esc); document.body.append(wrap);
+      setTimeout(() => { const l = chat.querySelector(".dir-list"); if (l) l.scrollTop = l.scrollHeight; }, 50);
     }
     const pid_ = () => (ws && ws.pid) || "";
     const cur = () => (ws && ws.scenes.find(s => s.id === ws.sceneId)) || null;
     const ctx = () => ({ refresh, project: ws.project, scenes: ws.scenes, actions });
-    async function refresh() { if (!ws) return; const [project, scenes] = await Promise.all([APP.project(ws.pid), APP.scenes(ws.pid, true)]); if (!ws || !project) return; ws.project = project; ws.scenes = scenes; if (!scenes.some(s => s.id === ws.sceneId)) ws.sceneId = (scenes[0] || {}).id || ""; draw(); }
-    function startPoll() { stopPoll(); poll = setInterval(() => { if (document.visibilityState === "visible" && ws && (ws.scenes.some(s => APP.sceneInfo(s).busy) || (ws.kickUntil || 0) > Date.now())) refresh().catch(() => {}); }, 5000); }
+    const sigOf = () => JSON.stringify([ws.project && [ws.project.name, ws.project.aspect, ws.project.updated], ws.scenes.map(s => [s.id, s.status, s.start_asset, s.video_asset, s.error, s.title, s.action, s.duration, (s.settings || {}).review, (s.settings || {}).cidentity && 1, (s.settings || {}).cflags && 1, (s.characters || []).join()])]);
+    // the workspace only redraws when something visible changed (no flicker, no lost scroll position while jobs run)
+    async function refresh(force) {
+      if (!ws) return; const [project, scenes] = await Promise.all([APP.project(ws.pid), APP.scenes(ws.pid, true)]); if (!ws || !project) return;
+      ws.project = project; ws.scenes = scenes; if (!scenes.some(s => s.id === ws.sceneId)) ws.sceneId = (scenes[0] || {}).id || "";
+      const sig = sigOf(); if (!force && sig === ws.sig) { updateStrip(); return; }
+      const ae = document.activeElement; if (!force && ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && rootEl.contains(ae)) { ws.sig = sig; updateStrip(); return; }   // editing a field: keep the selected scene and the cursor
+      ws.sig = sig; const y = window.scrollY; draw(); window.scrollTo(0, y);
+    }
+    function startPoll() {   // while the workspace is open: every 5 s when work is running, every 15 s otherwise; paused while the tab is hidden
+      stopPoll(); let n = 0;
+      poll = setInterval(() => {
+        if (document.visibilityState !== "visible" || !ws || host.hidden) return; n++;
+        const busy = ws.scenes.some(s => APP.sceneInfo(s).busy) || (ws.kickUntil || 0) > Date.now();
+        if (busy || n % 3 === 0) { refresh().catch(() => {}); if (APP.refreshGpu) APP.refreshGpu().then(updateStrip).catch(() => {}); }
+      }, 5000);
+    }
     function stopPoll() { if (poll) clearInterval(poll); poll = null; }
     function pick(id) { ws.sceneId = id; APP.state.sceneId = id; history.replaceState(null, "", `#/projects/${ws.pid}/${ws.mode}/${id}`); draw(); }
-    function setMode(m) { APP.go(`/projects/${ws.pid}/${m}${ws.sceneId ? "/" + ws.sceneId : ""}`); }
+    function go(sec, sub) { if (sub) APP.LS.set(`ws_sub:${ws.pid}:${sec}`, sub); APP.go(`/projects/${ws.pid}/${sec}${ws.sceneId && sec !== "ai" ? "/" + ws.sceneId : ""}`); }
+    function setMode(m) { go(m === "ai" ? "ai" : APP.LS.get("ws_sec:" + ws.pid, "storyboard")); }
+
+    // ------------------------------------------------------------------ chrome: compact header, mode switch, section tabs, live progress strip
+    function stats() {
+      const p = ws.project, infos = ws.scenes.map(s => APP.sceneInfo(s, p)), n = infos.length, c = k => infos.filter(i => i.key === k).length;
+      const done = infos.filter(i => i.hasVideo).length, frames = infos.filter(i => i.hasFrame).length, active = infos.filter(i => i.busy).length, fix = c("failed"), review = c("review"), approved = infos.filter(i => i.approved).length;
+      const pct = n ? (frames / n) * 0.4 + (done / n) * 0.6 : 0;
+      const status = !n ? ["Empty", ""] : active ? ["Generating", "run"] : fix ? ["Needs fix", "bad"] : review ? ["To review", "warn"] : done === n ? ["Done", "ok"] : ["In progress", ""];
+      return { n, done, frames, active, fix, review, approved, pct, status };
+    }
+    function todaySpend() { const today = new Date().toDateString(); return ((APP.gpu && APP.gpu.recent) || []).filter(j => new Date((j.finished || 0) * 1000).toDateString() === today).reduce((a, j) => a + (j.cost || 0), 0); }
+    function stripChips(st) {
+      const g = APP.gpu || {}, chip = (cls, bold, label) => h("span", { class: "c " + cls }, h("i"), h("b", {}, bold), label ? " " + label : "");
+      return [chip("ok", st.done + "/" + st.n, "done"), st.active ? chip("run", st.active, "active") : null, st.fix ? chip("bad", st.fix, "needs fix") : null, st.review ? chip("warn", st.review, "to review") : null,
+        h("span", { class: "c" }, h("i"), (g.label || "GPU") + (g.running && g.running.length ? " · " + g.running.length + " job" + (g.running.length > 1 ? "s" : "") : "")), h("span", { class: "c" }, h("b", {}, APP.money(todaySpend())), "today")];
+    }
+    function updateStrip() { const el = document.getElementById("ws-strip"); if (!el || !ws) return; const st = stats(); el.replaceChildren(...stripChips(st).filter(Boolean)); const pb = document.getElementById("ws-pb"); if (pb) { pb.style.width = Math.round(st.pct * 100) + "%"; pb.parentElement.setAttribute("aria-valuenow", Math.round(st.pct * 100)); pb.parentElement.classList.toggle("bad", st.fix > 0); } }
+    function tabsEl(items, cur, onPick, cls = "ws-tabs") {
+      const bar = h("div", { class: cls, role: "tablist" }, items.map(([k, l]) => h("button", { type: "button", role: "tab", class: k === cur ? "on" : "", "aria-selected": k === cur, onclick: () => onPick(k) }, l)));
+      const wrap = h("div", { class: "ws-tabs-wrap" }, bar), edges = () => { wrap.classList.toggle("l", bar.scrollLeft > 4); wrap.classList.toggle("r", bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 4); };
+      bar.addEventListener("scroll", edges, { passive: true });
+      setTimeout(() => { const on = bar.querySelector(".on"); if (on) bar.scrollLeft = on.offsetLeft - (bar.clientWidth - on.offsetWidth) / 2; edges(); }, 0);   // the selected section is always visible
+      return wrap;
+    }
+    const SUBS = { videos: [["clips", "Clips"], ["editor", "Editor"]], settings: [["look", "Look"], ["studioflows", "Workflows"], ["queue", "Queue"]] };
 
     function draw() {
       if (!ws) return;
-      const { project: p, scenes, mode } = ws, pl = APP.pipeline(scenes), pend = scenes.filter(s => APP.sceneInfo(s, p).key === "review").length;
-      const head = h("div", { class: "ws-head" },
-        h("button", { class: "ds-btn icon sm ghost", "aria-label": "All projects", onclick: () => APP.go("/projects") }, icon("back")),
-        h("div", { class: "t" }, h("h1", {}, txt(p.name, "Untitled project")), h("div", { class: "ds-row ds-wrap", style: "gap:6px;margin-top:3px" }, h("span", { class: "ds-pill" }, p.aspect), h("span", { class: "ds-small" }, `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`), pend ? h("span", { class: "ds-pill warn" }, pend + " to review") : null, ws.scenes.some(s => APP.sceneInfo(s).busy) ? h("span", { class: "ds-pill run" }, h("i"), "Generating") : null)),
-        h("button", { class: "ds-btn icon sm", "aria-label": "Project menu", onclick: () => projectMenu() }, icon("dots")));
-      const pipe = h("div", { class: "ws-pipe", "aria-label": "Production pipeline" }, pl.steps.map(s => h("span", { class: "ws-step" + (s.done ? " done" : s.cur ? " cur" : "") }, h("i"), s.name)));
-      const top = h("div", { class: "ds-seg dir-top", role: "tablist", "aria-label": "Workspace" }, [["ai", "AI Director"], ["storyboard", "Manual Editor"]].map(([k, l]) => h("button", { type: "button", role: "tab", class: (k === "ai") === (mode === "ai") ? "on" : "", "aria-selected": (k === "ai") === (mode === "ai"), onclick: () => setMode(k) }, l)));
-      const seg = mode === "ai" ? null : h("div", { class: "ds-seg", role: "tablist" }, MODES.map(([k, l]) => h("button", { type: "button", role: "tab", class: mode === k ? "on" : "", "aria-selected": mode === k, onclick: () => setMode(k) }, l)));
-      const legacyNow = mode === "editor" || mode === "automation", key = pid_() + ":" + mode;
+      const { project: p, scenes, mode } = ws, st = stats(), ai = mode === "ai";
+      const head = h("div", { class: "ws-head2" },
+        h("button", { class: "ds-btn icon ghost", "aria-label": "All projects", onclick: () => APP.go("/projects") }, icon("back")),
+        h("div", { class: "t" }, h("h1", { title: txt(p.name, "Untitled project") }, txt(p.name, "Untitled project")),
+          h("div", { class: "ws-meta" }, h("span", { class: "ds-pill" }, p.aspect), h("span", {}, `${st.n} scene${st.n === 1 ? "" : "s"}`), h("span", { class: "ds-pill " + st.status[1] }, st.status[0]))),
+        ai ? null : h("button", { class: "ds-btn icon", "aria-label": "Open AI Director chat", title: "AI Director chat", onclick: () => chatSheet() }, icon("sparkle")),
+        h("button", { class: "ds-btn icon", "aria-label": "Project menu", onclick: () => projectMenu() }, icon("dots")));
+      const prog = h("div", { class: "ws-prog" + (st.fix ? " bad" : ""), role: "progressbar", "aria-label": "Project progress", "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": Math.round(st.pct * 100) }, h("i", { id: "ws-pb", style: `width:${Math.round(st.pct * 100)}%` }));
+      const modeSw = h("div", { class: "ws-mode", role: "tablist", "aria-label": "Mode" }, [["manual", "Manual Editor", "film"], ["ai", "AI Director", "sparkle"]].map(([k, l, ic]) => h("button", { type: "button", role: "tab", class: (k === "ai") === ai ? "on" : "", "aria-selected": (k === "ai") === ai, onclick: () => setMode(k) }, icon(ic), l)));
+      const sec = ws.mode, sub = ws.sub, legacyNow = !ai && ((sec === "videos" && sub === "editor") || (sec === "settings" && (sub === "studioflows" || sub === "queue"))), key = pid_() + ":" + sec + ":" + sub;
       if (!legacyNow && legacy.parentElement !== host) host.append(legacy);   // the old screens go back to their hidden home when not in use
       const reuse = legacyNow && ws.legacyBody && ws.legacyKey === key;   // keep the mounted Editor / Workflows screen (and anything not saved yet) untouched by refreshes
-      const body = reuse ? ws.legacyBody : h("div", { id: "ws-content" });
+      if (ai) { ws.legacyBody = null; ws.legacyKey = ""; legacy.style.display = "none"; rootEl.replaceChildren(h("div", { class: "ws ws-ai" }, head, prog, modeSw, chatNode())); chatNode().classList.toggle("compact", false); return; }
+      const strip = h("div", { class: "ws-strip", id: "ws-strip", "aria-label": "Generation progress", "aria-live": "off" }, stripChips(st).filter(Boolean));
+      const tabs = tabsEl(SECTIONS, sec, k => go(k)), subseg = SUBS[sec] ? h("div", { class: "ws-subseg", role: "tablist" }, SUBS[sec].map(([k, l]) => h("button", { type: "button", role: "tab", class: k === sub ? "on" : "", "aria-selected": k === sub, onclick: () => go(sec, k) }, l))) : null;
+      const body = reuse ? ws.legacyBody : h("div", { id: "ws-content", class: "ds-stack", style: "min-width:0" });
       ws.legacyBody = legacyNow ? body : null; ws.legacyKey = legacyNow ? key : "";
-      const chat = chatNode(mode === "ai"); if (window.DIR && DIR.createChat) { chat.classList.toggle("compact", mode !== "ai"); }
-      if (mode === "ai") { legacy.style.display = "none"; rootEl.replaceChildren(h("div", { class: "ws ws-ai" }, head, top, chat)); return; }
-      rootEl.replaceChildren(h("div", { class: "ws" }, head, pipe, top, dock(chat), h("div", { style: "overflow-x:auto" }, seg), body));
+      const wsEl = h("div", { class: "ws" }, head, prog, modeSw, tabs, strip, subseg, body);
+      rootEl.replaceChildren(wsEl);
       if (reuse) { legacy.style.display = ""; return; }
-      if (mode === "storyboard") storyboardMode(body); else if (mode === "director") directorMode(body); else legacyMode(body, mode);
+      if (sec === "storyboard") galleryMode(body); else if (sec === "scenes") storyboardMode(body); else if (sec === "characters") charactersMode(body);
+      else if (sec === "videos") { if (sub === "editor") legacyMode(body, "editor"); else videosMode(body); } else if (sec === "settings") { if (sub === "look") directorMode(body); else legacyMode(body, "automation"); }
+      wsEl.classList.toggle("has-bar", !!wsEl.querySelector(".ws-bar"));
+    }
+
+    // ------------------------------------------------------------------ Storyboard gallery: 9:16 cells, lazy small thumbnails, tap = full-screen viewer with the ORIGINAL picture
+    const shortStatus = info => info.key === "failed" ? ["Needs fix", "bad"] : info.busy ? ["Generating", "run"] : info.hasVideo ? ["Video", "ok"] : info.key === "rejected" ? ["Rejected", "bad"] : info.approved ? ["Approved", "ok"] : info.hasFrame ? ["To review", "warn"] : info.key === "draft" ? ["Draft", ""] : ["No frame", ""];
+    function viewerItems(filterFn) {
+      const p = ws.project, out = [];
+      ws.scenes.forEach((s, i) => { if (!s.start_asset_url || (filterFn && !filterFn(s))) return; const info = APP.sceneInfo(s, p), [lab, tone] = shortStatus(info); out.push({ url: s.start_asset_url, thumb: APP.thumbPeek ? APP.thumbPeek("a" + s.start_asset, 360) : "", title: `Scene ${i + 1}${s.title && !/^scene \d+$/i.test(s.title.trim()) ? " · " + s.title : ""}`, status: lab, tone, scene: s, id: s.id, filename: `scene-${i + 1}` }); });
+      return out;
+    }
+    function openViewer(sc) {
+      const items = viewerItems(), idx = Math.max(0, items.findIndex(x => x.id === sc.id)); if (!items.length) return;
+      APP.viewer(items, idx, { onReview: it => APP.openReview(it.scene, ws.project, ctx()) });
+    }
+    function cell(sc, i, p, onTap, video) {
+      const info = APP.sceneInfo(sc, p), [lab, tone] = shortStatus(info), fr = h("div", { class: "gl-frame", style: `--ar:${APP.arCss(p.aspect)}` });
+      if (info.hasFrame) { fr.classList.add("sk"); const im = APP.lazyThumb ? APP.lazyThumb("a" + sc.start_asset, sc.start_asset_url, `Scene ${i + 1}`) : h("img", { src: sc.start_asset_url, loading: "lazy", alt: "" }); im.addEventListener("load", () => fr.classList.remove("sk")); im.addEventListener("error", () => fr.classList.remove("sk")); fr.append(im); }
+      else fr.append(h("div", { class: "gl-empty" }, icon(info.busy ? "sparkle" : "img"), info.busy ? "Making the frame…" : "No frame yet"));
+      const cap = h("div", { class: "gl-cap" }, h("b", {}, txt(sc.title, "Scene " + (i + 1))), h("span", {}, `${sc.duration || 6}s${video ? (info.hasVideo ? " · video ready" : "") : ""}`));
+      return h("button", { type: "button", class: "gl-cell " + tone, onclick: onTap, "aria-label": `Scene ${i + 1}, ${lab}. ${info.hasFrame ? "Open full screen" : "Open scene"}` }, fr, h("span", { class: "gl-num" }, i + 1), h("span", { class: "gl-st" }, h("i"), lab), cap);
+    }
+    function emptyScenes(body) {
+      body.append(h("div", { class: "ds-empty" }, icon("film"), h("b", {}, "No scenes yet"), "Plan the story first. Each scene becomes one start frame and one video.",
+        h("div", { class: "ds-row ds-wrap", style: "justify-content:center" }, h("button", { class: "ds-btn pri", onclick: () => actions.addScene() }, icon("plus"), "Add a scene"), h("button", { class: "ds-btn", onclick: () => actions.plan() }, icon("sparkle"), "Auto-plan scenes"), h("button", { class: "ds-btn", onclick: () => actions.importScenes() }, "Import JSON"))));
+    }
+    function galleryMode(body) {
+      const { project: p, scenes } = ws; if (!scenes.length) return emptyScenes(body);
+      const infos = scenes.map(s => APP.sceneInfo(s, p)), F = [["all", "All", () => true], ["review", "To review", i => i.key === "review"], ["approved", "Approved", i => i.approved && !i.hasVideo], ["run", "Generating", i => i.busy], ["fix", "Needs fix", i => i.key === "failed" || i.key === "rejected"]];
+      const cnt = k => infos.filter(F.find(f => f[0] === k)[2]).length, cur = ws.glFilter || "all", pred = F.find(f => f[0] === cur)[2];
+      const bar = h("div", { class: "gl-bar", role: "tablist", "aria-label": "Filter scenes" }, F.map(([k, l]) => h("button", { type: "button", role: "tab", class: "ds-chip" + (k === cur ? " on" : ""), "aria-selected": k === cur, onclick: () => { ws.glFilter = k; draw(); } }, `${l} ${cnt(k)}`)));
+      const shown = scenes.map((s, i) => [s, i]).filter(([s, i]) => pred(infos[i]));
+      const grid = h("div", { class: "gl-grid", role: "list" }, shown.map(([s, i]) => cell(s, i, p, () => { if (s.start_asset_url) openViewer(s); else { ws.sceneId = s.id; go("scenes"); } })));
+      body.append(bar, shown.length ? grid : h("div", { class: "ds-empty" }, "No scenes in this filter."), h("div", { class: "ds-small", style: "text-align:center" }, "Tap a picture to see it full screen. Pinch or double-tap to zoom."));
+    }
+    function videosMode(body) {
+      const { project: p, scenes } = ws; if (!scenes.length) return emptyScenes(body);
+      const grid = h("div", { class: "gl-grid" }, scenes.map((s, i) => cell(s, i, p, () => clipSheet(s, i), true)));
+      body.append(h("div", { class: "ds-small" }, "Tap a scene to watch its video or make one. Videos only start when you confirm the cost."), grid);
+    }
+    function clipSheet(sc, i) {
+      const p = ws.project, info = APP.sceneInfo(sc, p);
+      if (info.hasVideo) { const items = ws.scenes.map((s, j) => s.video_asset_url ? { video: s.video_asset_url, thumb: s.start_asset_url || "", title: `Scene ${j + 1} · video`, status: "Video", tone: "ok", id: s.id, filename: `scene-${j + 1}` } : null).filter(Boolean); return APP.viewer(items, Math.max(0, items.findIndex(x => x.id === sc.id)), {}); }
+      APP.sheet((box, close) => box.append(h("h2", { class: "ds-h2", style: "font-size:17px;margin-bottom:6px" }, `Scene ${i + 1} · ${txt(sc.title, "Untitled")}`), h("div", { class: "ds-row ds-wrap", style: "margin-bottom:12px" }, h("span", { class: "ds-pill " + shortStatus(info)[1] }, shortStatus(info)[0]), h("span", { class: "ds-pill" }, "~" + APP.money(APP.estimate(sc, "clip")) + " per video")),
+        h("p", { class: "ds-sub" }, info.busy ? "This scene is being made on the GPU. You can leave this page." : !info.hasFrame ? "Make and approve the start frame first (Scenes tab)." : !info.approved ? "Approve the start frame first, then make the video." : "The start frame is approved. A video takes about 7 minutes on the GPU."),
+        h("div", { class: "ds-row" }, h("button", { class: "ds-btn ghost", style: "flex:1", onclick: close }, "Close"), h("button", { class: "ds-btn", style: "flex:1", onclick: () => { close(); ws.sceneId = sc.id; go("scenes"); } }, "Open scene"),
+          info.approved && !info.busy ? h("button", { class: "ds-btn pri", style: "flex:1.3", onclick: () => { close(); actions.video(sc); } }, icon("play"), "Make video") : null)));
+    }
+    function charactersMode(body) {
+      const p = ws.project, inProject = new Set([...(p.characters || []), ...ws.scenes.flatMap(s => s.characters || [])]), mine = ws.chars.filter(c => inProject.has(c.id)), rest = ws.chars.filter(c => !inProject.has(c.id));
+      const uses = c => ws.scenes.filter(s => (s.characters || []).includes(c.id)).length;
+      const card = (c, add) => h("div", { class: "ch-card" }, h("div", { class: "th" }, c.thumb ? h("img", { src: c.thumb, alt: c.name, loading: "lazy", decoding: "async" }) : icon("user")),
+        h("div", { class: "b" }, h("b", {}, txt(c.name, "Unnamed")), h("span", {}, add ? `${(c.refs || []).length} reference${(c.refs || []).length === 1 ? "" : "s"}` : `${(c.refs || []).length} reference${(c.refs || []).length === 1 ? "" : "s"} · in ${uses(c)} scene${uses(c) === 1 ? "" : "s"}`)),
+        add ? h("button", { class: "ds-btn sm", onclick: async () => { try { await APP.saveProject(p, { characters: [...(p.characters || []), c.id] }); await refresh(true); } catch (e) { APP.fail(e); } } }, icon("plus"), "Add")
+          : h("button", { class: "ds-btn sm", onclick: () => window.SP.editCharacter(c, () => { APP.changed("chars"); refresh(true); }) }, "Edit"));
+      body.append(h("div", { class: "ds-h2" }, "In this project"), mine.length ? h("div", { class: "ch-list" }, mine.map(c => card(c, false))) : h("div", { class: "ds-empty" }, icon("user"), h("b", {}, "No characters in this project"), "Add saved characters below. Their reference photos keep faces consistent in every scene."),
+        rest.length ? [h("div", { class: "ds-h2", style: "margin-top:8px" }, "Saved in your Library"), h("div", { class: "ch-list" }, rest.map(c => card(c, true)))] : null, h("div", { class: "ds-small" }, "Reference photos are never changed here. Open the Library to add or replace them."));
     }
 
     // ------------------------------------------------------------------ shared pieces
-    const thumbOf = (sc, project) => { const url = sc.start_asset_url; return h("div", { class: "ds-thumb", style: `--ar:${APP.arCss(project.aspect)}` }, url ? h("img", { src: url, loading: "lazy", alt: "", decoding: "async" }) : (sc.video_asset_url ? h("video", { src: sc.video_asset_url + "#t=0.3", muted: true, preload: "metadata" }) : icon("img"))); };
+    const thumbOf = (sc, project) => { const url = sc.start_asset_url; return h("div", { class: "ds-thumb", style: `--ar:${APP.arCss(project.aspect)}` }, url ? (APP.lazyThumb ? APP.lazyThumb("a" + sc.start_asset, url, "") : h("img", { src: url, loading: "lazy", alt: "", decoding: "async" })) : (sc.video_asset_url ? h("video", { src: sc.video_asset_url + "#t=0.3", muted: true, preload: "metadata" }) : icon("img"))); };
     function rail() {
       const { project: p, scenes } = ws;
       const r = h("div", { class: "ws-rail", role: "listbox", "aria-label": "Scenes" }, scenes.map((s, i) => { const info = APP.sceneInfo(s, p);
@@ -116,7 +233,7 @@
       if (showVideo) inner = h("video", { src: sc.video_asset_url, controls: true, playsinline: true, poster: sc.start_asset_url || null, preload: "metadata" });
       else if (info.hasFrame) inner = h("img", { src: sc.start_asset_url, alt: txt(sc.title, "Start frame"), decoding: "async" });
       else inner = h("div", { class: "ds-empty", style: "border:0;padding:12px" }, icon(info.busy ? "sparkle" : "img"), h("b", {}, info.busy ? "Making the start frame…" : "No start frame yet"), info.busy ? "The GPU may need about 5 minutes to wake. You can leave this page." : "Describe the scene, then generate its first frame.");
-      const view = swipeable(h("div", { class: "ws-view" + (land ? " land" : "") }, h("div", { class: "ds-thumb contain", style: `--ar:${ar}`, onclick: () => info.hasFrame && APP.openReview(sc, p, ctx()), title: info.hasFrame ? "Open full review" : "" }, inner)));
+      const view = swipeable(h("div", { class: "ws-view" + (land ? " land" : "") }, h("div", { class: "ds-thumb contain", style: `--ar:${ar}`, onclick: () => info.hasFrame && openViewer(sc), title: info.hasFrame ? "Tap for full screen" : "" }, inner)));
       const tabs = info.hasFrame && info.hasVideo ? h("div", { class: "ds-seg", style: "align-self:center" }, [["frame", "Start frame"], ["video", "Video"]].map(([k, l]) => h("button", { type: "button", class: (showVideo ? "video" : "frame") === k ? "on" : "", onclick: () => { ws.view = k; draw(); } }, l))) : null;
       return [tabs, view];
     }
@@ -128,15 +245,17 @@
       return el;
     }
     const reviewBtn = sc => h("button", { class: "ds-btn ghost icon", "aria-label": "Open full review", title: "Open full review", onclick: () => APP.openReview(sc, ws.project, ctx()) }, icon("zoom"));
+    // Sticky action bar (fixed above the bottom navigation on phones, safe-area aware). Unavailable actions are disabled AND explained in the hint line.
     function actionBar(sc, info) {
-      const b = (cls, label, fn, ico, dis) => h("button", { class: "ds-btn " + cls, disabled: !!dis, onclick: fn }, ico ? icon(ico) : null, label);
-      const bar = h("div", { class: "ws-bar" });
-      if (info.busy) bar.append(b("", info.key === "video_run" ? "Making video…" : "Making frame…", null, null, true), sc.job_id ? b("bad", "Cancel", () => actions.cancel(sc), "x") : null);
-      else if (!info.hasFrame) bar.append(b("pri", `Generate start frame · ~${APP.money(APP.estimate(sc, "frame"))}`, () => actions.frame(sc), "sparkle", !sc.action && !sc.title));
-      else if (info.key === "review" || info.key === "rejected") bar.append(b("bad", "Reject", () => actions.reject(sc)), b("", "Regenerate", () => actions.frame(sc), "refresh"), b("ok", "Approve", () => actions.approve(sc), "check"), reviewBtn(sc));
-      else if (info.key === "approved") bar.append(b("pri", `Generate video · ~${APP.money(APP.estimate(sc, "clip"))}`, () => actions.video(sc), "play"), b("", "New frame", () => actions.frame(sc), "refresh"), reviewBtn(sc));
-      else bar.append(b("", "Review", () => APP.openReview(sc, ws.project, ctx()), "zoom"), b("", "New video · ~" + APP.money(APP.estimate(sc, "clip")), () => actions.video(sc), "play"), sc.video_asset ? h("a", { class: "ds-btn", href: sc.video_asset_url, download: (sc.title || "scene") + ".mp4" }, "Save") : null);
-      return bar;
+      const est = APP.money(APP.estimate(sc, "frame")), clip = APP.money(APP.estimate(sc, "clip"));
+      const b = (cls, label, fn, ico, dis, why) => h("button", { type: "button", class: "ds-btn " + cls, disabled: !!dis, title: dis && why ? why : label, "aria-label": label + (dis && why ? ". " + why : ""), onclick: fn }, ico ? icon(ico) : null, h("span", { class: "lbl" }, label));
+      let hint = "", btns = [];
+      if (info.busy) { hint = "Working on the GPU. You can leave this page; it keeps going."; btns = [b("", info.key === "video_run" ? "Making video\u2026" : "Making frame\u2026", null, null, true, "Wait until it finishes"), sc.job_id ? b("bad", "Cancel", () => actions.cancel(sc), "x") : null]; }
+      else if (!info.hasFrame) { const no = !sc.action && !sc.title; hint = no ? "Describe what happens in the scene first." : `Uses the GPU: about ${est}. You confirm before it starts.`; btns = [b("pri", `Make frame \u00b7 ~${est}`, () => actions.frame(sc), "sparkle", no, "Describe the scene first")]; }
+      else if (info.key === "review" || info.key === "rejected") { hint = `Approve keeps this frame. Redo uses the GPU (~${est}) and keeps the old frame in Versions.`; btns = [b("bad", "Reject", () => actions.reject(sc), "x"), b("", "Redo", () => actions.frame(sc), "refresh"), b("ok", "Approve", () => actions.approve(sc), "check", info.review === "approved", "Already approved")]; }
+      else if (info.key === "approved") { hint = `Frame approved. A video costs about ${clip} and takes ~7 min; you confirm first.`; btns = [b("", "New frame", () => actions.frame(sc), "refresh"), b("pri", `Make video \u00b7 ~${clip}`, () => actions.video(sc), "play")]; }
+      else { hint = "Video ready."; btns = [b("", "Full screen", () => openViewer(sc), "zoom", !sc.start_asset_url, "No frame to show"), b("", "New video", () => actions.video(sc), "play"), sc.video_asset ? h("a", { class: "ds-btn", href: sc.video_asset_url, download: (sc.title || "scene") + ".mp4", "aria-label": "Save the video" }, icon("down"), h("span", { class: "lbl" }, "Save")) : null]; }
+      return h("div", { class: "ws-bar", role: "group", "aria-label": "Scene actions" }, h("div", { class: "ws-hint" }, hint), h("div", { class: "ws-btns" }, btns.filter(Boolean)));
     }
 
     // ------------------------------------------------------------------ Storyboard mode
@@ -181,7 +300,7 @@
     async function directorMode(body) {
       const { project: p } = ws, sc = cur();
       const presets = await api("director");
-      if (!ws || ws.mode !== "director") return;
+      if (!ws || ws.mode !== "settings") return;
       const look = { ...(p.data.director || {}) }, saved = h("span", { class: "ds-small" });
       let t; const persist = () => { clearTimeout(t); t = setTimeout(async () => { try { await APP.saveProject(p, { data: { ...p.data, director: look } }); saved.textContent = "Saved ✓"; } catch (e) { APP.fail(e, "Could not save"); } }, 500); };
       const preview = h("div", { class: "ds-sub" });
@@ -192,7 +311,7 @@
         return Object.entries(presets).map(([g, def]) => { const sel = h("select", { class: "ds-select" }, [h("option", { value: "" }, "Project default"), ...def.items.map(it => h("option", { value: it.id, selected: d[g] === it.id }, it.label))]); sel.onchange = () => { sel.value ? d[g] = sel.value : delete d[g]; sv(); }; return h("div", { class: "ds-field" }, h("label", {}, def.label), sel); }); })() : [];
       const quality = sc ? (() => { const sel = h("select", { class: "ds-select" }, [["high", "High (sharper, slower)"], ["fast", "Fast (cheaper)"]].map(([v, l]) => h("option", { value: v, selected: ((sc.settings || {}).quality || "high") === v }, l))); sel.onchange = async () => { try { await APP.saveScene(sc, { settings: { ...(sc.settings || {}), quality: sel.value } }); } catch (e) { APP.fail(e); } }; return sel; })() : null;
       const camera = sc ? (() => { const el = h("input", { class: "ds-input", value: txt(sc.camera), placeholder: "slow push-in, tracking shot" }); let tt; el.oninput = () => { clearTimeout(tt); tt = setTimeout(async () => { try { await APP.saveScene(sc, { camera: el.value }); showPrompt(); } catch (e) { APP.fail(e); } }, 600); }; return el; })() : null;
-      body.append(h("div", { class: "ws-body" }, rail(), h("div", { class: "ws-stage" }, sc ? [h("div", { class: "ds-h2" }, `Scene ${ws.scenes.indexOf(sc) + 1} · camera & look`), stage(sc, APP.sceneInfo(sc, p))[1], h("div", { class: "ds-card flat" }, h("div", { class: "ds-small", style: "margin-bottom:6px" }, "Prompt sent to the video model"), preview), actionBar(sc, APP.sceneInfo(sc, p))] : h("div", { class: "ds-empty" }, icon("film"), h("b", {}, "Add scenes in Storyboard first"))),
+      body.append(h("div", { class: "ws-body" }, rail(), h("div", { class: "ws-stage" }, sc ? [h("div", { class: "ds-h2" }, `Scene ${ws.scenes.indexOf(sc) + 1} · camera & look`), stage(sc, APP.sceneInfo(sc, p))[1], h("div", { class: "ds-card flat" }, h("div", { class: "ds-small", style: "margin-bottom:6px" }, "Prompt sent to the video model"), preview)] : h("div", { class: "ds-empty" }, icon("film"), h("b", {}, "Add scenes in Storyboard first"))),
         h("div", { class: "ws-panel" }, h("p", { class: "ds-small", style: "margin:0" }, "Presets are written into the prompt. They steer the model but are not guaranteed camera controls."),
           h("details", { class: "ws-sec", open: true }, h("summary", {}, "Scene overrides"), h("div", { class: "in" }, sc ? [h("div", { class: "ds-field" }, h("label", {}, "Camera movement"), camera), ...over, h("div", { class: "ds-field" }, h("label", {}, "Video quality"), quality), h("div", { class: "ds-field" }, h("label", {}, "Video model"), h("div", { class: "ds-pill" }, "MiniMax-H3 · image to video with sound"))] : h("div", { class: "ds-sub" }, "Select a scene."))),
           h("details", { class: "ws-sec" }, h("summary", {}, "Project look (all scenes)"), h("div", { class: "in" }, ...lookCards, saved)))));
@@ -202,11 +321,8 @@
     // ------------------------------------------------------------------ Editor and Automation: the existing screens, mounted inside the workspace
     async function legacyMode(body, mode) {
       const { pid } = ws;
-      const subs = mode === "automation" ? [["studioflows", "Workflows"], ["queue", "Queue & retries"]] : null;
-      legacy.style.display = ""; legacy.classList.add("ws-legacy");
-      body.append(subs ? h("div", { class: "ds-seg", id: "ws-sub", style: "margin-bottom:10px" }, subs.map(([k, l], i) => h("button", { type: "button", class: (ws.sub || subs[0][0]) === k ? "on" : "", onclick: () => { ws.sub = k; show(k); [...document.querySelectorAll("#ws-sub button")].forEach((x, j) => x.classList.toggle("on", subs[j][0] === k)); } }, l))) : null, legacy);
-      const show = k => { window.showTab(k); };
-      try { if (mode === "editor") { await window.SP.use.editor(pid); window.showTab("editor"); } else { const k = ws.sub || subs[0][0]; if (k === "studioflows") await window.SP.use.flows(pid); window.showTab(k); } } catch (e) { APP.fail(e); }
+      legacy.style.display = ""; legacy.classList.add("ws-legacy"); body.append(legacy);
+      try { if (mode === "editor") { await window.SP.use.editor(pid); window.showTab("editor"); } else { const k = ws.sub === "queue" ? "queue" : "studioflows"; if (k === "studioflows") await window.SP.use.flows(pid); window.showTab(k); } } catch (e) { APP.fail(e); }
     }
 
     // ------------------------------------------------------------------ actions (everything that can cost money asks first, and never runs by itself)
@@ -258,7 +374,7 @@
     }
     // keyboard: scene navigation, approve, regenerate (desktop)
     window.addEventListener("keydown", e => {
-      if (host.hidden || !ws || ws.mode !== "storyboard" || document.querySelector(".rv,.ds-sheet") || (e.target.closest && e.target.closest("input,textarea,select"))) return;
+      if (host.hidden || !ws || ws.mode !== "scenes" || document.querySelector(".rv,.ds-sheet,.vw") || (e.target.closest && e.target.closest("input,textarea,select"))) return;
       const i = ws.scenes.findIndex(s => s.id === ws.sceneId);
       if (e.key === "ArrowRight" && i < ws.scenes.length - 1) pick(ws.scenes[i + 1].id); else if (e.key === "ArrowLeft" && i > 0) pick(ws.scenes[i - 1].id);
       else if (e.key.toLowerCase() === "a" && cur() && APP.sceneInfo(cur()).key === "review") actions.approve(cur()); else if (e.key.toLowerCase() === "r" && cur()) actions.frame(cur());
