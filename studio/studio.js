@@ -221,6 +221,7 @@
     const tog = (key, label) => h("button", { class: "sp-btn" + (PS[key] ? " on" : ""), onclick: () => { PS[key] = !PS[key]; if (key === "archived") PS.deleted = false; else PS.archived = false; loaders.projects(); } }, label);
     root.replaceChildren(
       h("div", { class: "sp-bar" }, h("h2", {}, "Projects"), tog("archived", "Archived"), tog("deleted", "Deleted"),
+        !PS.deleted && !PS.archived && items.length && window.BULK ? h("button", { class: "sp-btn bad", id: "bk-del-open", onclick: () => window.BULK.deleteProjects({ onDone: loaders.projects }) }, "Delete several…") : null,
         h("button", { class: "sp-btn pri", onclick: () => editProject({ name: "", aspect: "16:9", duration: 60, story: "", characters: [], asset_ids: [] }, loaders.projects) }, "New project")),
       h("div", { class: "sp-grid" }, items.length ? items.map(p => h("div", { class: "sp-card", onclick: () => editProject(p, loaders.projects) },
         h("div", { class: "pic" }, p.cover_url ? h("img", { src: p.cover_url, alt: p.name }) : "🎬"),

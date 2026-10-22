@@ -131,6 +131,50 @@ window.__bulkCheck = async function (opts = {}) {
     ok(cr2.replayed && calls.act.filter(c => c.op === "approve_all").length === 1, "the same key must not call the connector again");
     localStorage.removeItem("connector_act");
 
+    // ============ 6. delete projects: multi-select, two-step confirmation, recoverable (never selects anything but its own throw-away projects) ============
+    const stamp = Date.now(), DA = await mkProject("Delete test A " + stamp), DB = await mkProject("Delete test B " + stamp), DC = await mkProject("Delete test C " + stamp);
+    await APPX.api("scenes", { project_id: DC.id, title: "Busy scene", action: "x", characters: [], status: "generating" }); APPX.changed("all");
+    location.hash = "#/projects"; await wait(2000);
+    const opener = document.getElementById("bk-del-open");
+    ok(document.documentElement.scrollWidth <= innerWidth + 1 && [...document.querySelectorAll(".hm-hero button")].every(b => b.getBoundingClientRect().right <= innerWidth + 1), "the Projects list header must fit the screen with the new button (page is " + document.documentElement.scrollWidth + "px wide)");
+    if (ok(opener, "the Projects list must have a 'Delete projects…' button")) {
+      ok(opener.getBoundingClientRect().height >= 44, "Delete projects button under 44px");
+      opener.click(); await wait(2500);
+      const dsh = document.querySelector(".bk-sheet"), goBtn = () => document.getElementById("bk-del-go"), tick = p => [...document.querySelectorAll(".bk-sheet input[type=checkbox]")].find(c => c.getAttribute("aria-label") === "Select " + p.name);
+      if (ok(dsh && tick(DA) && tick(DB) && tick(DC), "the delete sheet must list every project with a checkbox")) {
+        ok(goBtn().disabled, "nothing is selected at first: the delete button must be disabled"); ok(/0 of \d+ selected/.test(dsh.innerText), "counter must start at 0");
+        ok(document.querySelector(".bk-sheet").getBoundingClientRect().right <= innerWidth + 1, "sheet wider than the screen");
+        tick(DA).click(); tick(DB).click(); await wait(200);
+        ok(/2 of \d+ selected/.test(dsh.innerText) && !goBtn().disabled, "ticking two projects must enable the button and count 2");
+        goBtn().click(); await wait(300);
+        ok(/Delete 2 projects\?/.test(dsh.innerText) && /Recently deleted/.test(dsh.innerText) && /restore/.test(dsh.innerText), "second confirmation must name the count and say they can be restored: " + dsh.innerText.slice(0, 200));
+        [...dsh.querySelectorAll("button")].find(b => b.textContent === "Back").click(); await wait(200);
+        ok(/2 of \d+ selected/.test(dsh.innerText), "Back must keep the selection"); goBtn().click(); await wait(200);
+        const before = (await APPX.api("projects")).items.length;
+        document.getElementById("bk-del-yes").click(); document.getElementById("bk-del-yes")?.click(); await wait(2000);
+        ok(/2 projects deleted/.test(document.querySelector(".bk-sheet").innerText), "result must say 2 projects deleted");
+        const left = (await APPX.api("projects")).items.map(p => p.id), gone = (await APPX.api("projects?deleted=1")).items.map(p => p.id);
+        ok(!left.includes(DA.id) && !left.includes(DB.id) && left.includes(DC.id) && left.length === before - 2, "exactly the two ticked projects must be gone from the list");
+        ok(gone.includes(DA.id) && gone.includes(DB.id), "deleted projects must be in Recently deleted (recoverable)");
+        await APPX.api("projects/" + DA.id + "/restore", {}); APPX.changed("all");
+        ok((await APPX.api("projects")).items.some(p => p.id === DA.id), "a deleted project must be restorable");
+        document.querySelectorAll(".bk-sheet").forEach(e => e.remove());
+      }
+      // busy warning + 'Select all' wording, without confirming anything
+      opener.isConnected || (location.hash = "#/projects", await wait(1500));
+      document.getElementById("bk-del-open").click(); await wait(2500);
+      const sh6 = document.querySelector(".bk-sheet"), cbC = [...document.querySelectorAll(".bk-sheet input[type=checkbox]")].find(c => c.getAttribute("aria-label") === "Select " + DC.name);
+      if (ok(sh6 && cbC, "the delete sheet must open again")) {
+        ok(/1 running/.test(sh6.innerText), "a project with a running scene must be marked '1 running'");
+        cbC.click(); await wait(200); document.getElementById("bk-del-go").click(); await wait(300);
+        ok(/does NOT stop the GPU/.test(sh6.innerText), "deleting a project with a running scene must warn that the GPU keeps running");
+        [...sh6.querySelectorAll("button")].find(b => b.textContent === "Back").click(); await wait(200);
+        const others = (await APPX.api("projects")).items.filter(p => !/^(Delete test|Bulk check|UI check)/.test(p.name));
+        if (!others.length) { document.getElementById("bk-del-all").click(); await wait(200); document.getElementById("bk-del-go").click(); await wait(300); ok(/Delete ALL \d+ projects\?/.test(sh6.innerText), "selecting everything must say 'Delete ALL n projects?'"); }
+      }
+      document.querySelectorAll(".bk-sheet").forEach(e => e.remove());     // (nothing above ever confirmed a deletion of anything but the two test projects)
+    }
+
     // ============ 5. cancel everything ============
     requests = [{ id: "r1", status: "IN_QUEUE" }, { id: "r2", status: "IN_QUEUE" }, { id: "r3", status: "IN_PROGRESS" }, { id: "r4", status: "FAILED" }, { id: "r5", status: "COMPLETED" }];
     if (SDB) await SDB.put("kv", { key: "director:" + P.id, value: { state: "FRAMES", paused: false } });

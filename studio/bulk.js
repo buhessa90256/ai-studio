@@ -172,6 +172,7 @@
   function sheet(build) {
     css();
     const box = h("div", { class: "bk-box", role: "dialog", "aria-modal": "true" }), wrap = h("div", { class: "bk-sheet" }, box);
+    for (const m of ["append", "replaceChildren"]) { const orig = Element.prototype[m]; box[m] = (...kids) => orig.apply(box, kids.flat(Infinity).filter(k => k != null && k !== false)); }   // optional elements may be null: never print "null" (the PC app does not patch the DOM like the phone app does)
     const close = () => { wrap.remove(); document.removeEventListener("keydown", esc); };
     const esc = e => { if (e.key === "Escape") close(); };
     wrap.onclick = e => { if (e.target === wrap) close(); }; document.addEventListener("keydown", esc); document.body.append(wrap);
@@ -313,5 +314,47 @@
       })()));
   }
 
-  window.BULK = { bar, plan, classify, execute, cancelEverything, cancelPreview, cancelRun, lastRec, loadRec, version };
+
+  // ------------------------------------------------------------------ Delete projects (several at once, or all): the same RECOVERABLE soft delete as the single "Delete project" (Recently deleted -> Restore)
+  async function deleteProjects(opts = {}) {
+    css();
+    const s = sheet(box => box.append(h("h3", {}, "Delete projects"), h("p", { class: "bk-mut" }, "Loading your projects…")));
+    let projects = [], busy = {};
+    try {
+      projects = ((await api("projects")).items || []);
+      for (const p of projects) { try { busy[p.id] = ((await api("scenes?project=" + p.id)).items || []).filter(x => ["keyframe_generating", "generating", "queued"].includes(x.status)).length; } catch { busy[p.id] = 0; } }
+    } catch (e) { s.box.replaceChildren(h("h3", {}, "Delete projects"), h("p", { class: "bk-bad" }, String(e.message || e)), h("div", { class: "bk-row" }, h("button", { onclick: s.close }, "Close"))); return; }
+    if (!projects.length) { s.box.replaceChildren(h("h3", {}, "Delete projects"), h("p", { class: "bk-mut" }, "There are no projects to delete."), h("div", { class: "bk-row" }, h("button", { onclick: s.close }, "Close"))); return; }
+    const picked = new Set(), boxes = new Map();
+    const count = h("span", { class: "bk-mut", id: "bk-del-count" }), go = h("button", { class: "dng", id: "bk-del-go", disabled: true }, "Delete");
+    const sync = () => { count.textContent = `${picked.size} of ${projects.length} selected`; go.disabled = !picked.size; go.textContent = picked.size ? `Delete ${picked.size} project${picked.size > 1 ? "s" : ""}…` : "Delete"; boxes.forEach((cb, id) => { cb.checked = picked.has(id); }); };
+    const rows = projects.map(p => { const cb = h("input", { type: "checkbox", "aria-label": "Select " + esc(p.name), style: "width:22px;height:22px;flex:none" }); cb.onchange = () => { cb.checked ? picked.add(p.id) : picked.delete(p.id); sync(); }; boxes.set(p.id, cb);
+      return h("label", { style: "display:flex;gap:12px;align-items:center;padding:10px 4px;border-bottom:1px solid rgba(127,127,127,.25);min-height:46px;cursor:pointer" }, cb, h("span", { style: "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }, esc(p.name) || "Untitled"), busy[p.id] ? h("span", { class: "bk-warn", style: "font-size:12px" }, `${busy[p.id]} running`) : null); });
+    const step1 = () => { s.box.replaceChildren(h("h3", {}, "Delete projects"),
+      h("p", { class: "bk-mut", style: "font-size:14px" }, "Pick the projects to delete. They go to “Recently deleted” and can be restored. Pictures, videos and characters in the Library are not touched."),
+      h("div", { class: "bk-row", style: "margin:8px 0;align-items:center" }, h("button", { id: "bk-del-all", style: "flex:none", onclick: () => { projects.forEach(p => picked.add(p.id)); sync(); } }, "Select all"), h("button", { style: "flex:none", onclick: () => { picked.clear(); sync(); } }, "Select none"), count),
+      h("div", { style: "max-height:46vh;overflow:auto" }, rows), h("div", { class: "bk-row" }, h("button", { onclick: s.close }, "Cancel"), go)); sync(); };
+    go.onclick = () => {
+      const chosen = projects.filter(p => picked.has(p.id)), running = chosen.reduce((a, p) => a + (busy[p.id] || 0), 0), all = chosen.length === projects.length;
+      const yes = h("button", { class: "dng", id: "bk-del-yes" }, `Yes, delete ${chosen.length}`);
+      yes.onclick = async () => {
+        if (yes.disabled) return; yes.disabled = true; yes.textContent = "Deleting…";
+        let ok = 0; const bad = [];
+        for (const p of chosen) { try { await api("projects/" + p.id + "/delete", {}); ok++; } catch (e) { bad.push(esc(p.name) + ": " + String(e.message || e).slice(0, 80)); } }
+        try { APPX() && APPX().changed && APPX().changed("all"); } catch {}
+        s.box.replaceChildren(h("h3", { class: bad.length ? "bk-warn" : "bk-ok" }, bad.length ? "Some projects could not be deleted" : "Done."),
+          h("p", {}, `${ok} project${ok === 1 ? "" : "s"} deleted. You can restore ${ok === 1 ? "it" : "them"} from Recently deleted.`), bad.length ? h("ul", { class: "bk-bad" }, bad.map(b => h("li", {}, b))) : null,
+          h("div", { class: "bk-row" }, h("button", { class: "pri", onclick: s.close }, "Close")));
+        try { opts.onDone && opts.onDone(); } catch {}
+      };
+      s.box.replaceChildren(h("h3", {}, all ? `Delete ALL ${chosen.length} projects?` : `Delete ${chosen.length} project${chosen.length > 1 ? "s" : ""}?`),
+        h("ul", { style: "font-size:14px" }, chosen.slice(0, 12).map(p => h("li", {}, esc(p.name) || "Untitled")), chosen.length > 12 ? h("li", { class: "bk-mut" }, `…and ${chosen.length - 12} more`) : null),
+        h("p", {}, "They move to Recently deleted, where you can restore them. Pictures, videos and characters stay in the Library."),
+        running ? h("p", { class: "bk-warn" }, `${running} scene${running > 1 ? "s are" : " is"} still being made on the GPU. Deleting a project does NOT stop the GPU (and its cost). Use Cancel everything first if you want that.`) : null,
+        h("div", { class: "bk-row" }, h("button", { onclick: step1 }, "Back"), yes));
+    };
+    step1();
+  }
+
+  window.BULK = { bar, plan, classify, execute, cancelEverything, cancelPreview, cancelRun, deleteProjects, lastRec, loadRec, version };
 })();
