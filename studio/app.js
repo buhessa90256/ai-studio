@@ -127,5 +127,6 @@
   setInterval(() => { if (document.visibilityState === "visible") APP.refreshGpu(); }, 15000);
 
   // ------------------------------------------------------------------ selection (kept in sync with the old screens through the shared localStorage key)
+  APP.syncNow = () => (window.__connectorSync ? window.__connectorSync() : Promise.resolve());
   APP.select = (pid, sceneId) => { APP.state.projectId = pid || ""; APP.state.sceneId = sceneId || ""; LS.set("sb_project", pid || ""); APP.emit("select", APP.state); };
 })();

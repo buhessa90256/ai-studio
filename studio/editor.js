@@ -211,4 +211,5 @@
     draw();
   }
   loaders.editor = () => load().catch(err);
+  window.SP.use = Object.assign(window.SP.use || {}, { editor: pid => { E.projectId = pid; return load().catch(err); } });
 })();

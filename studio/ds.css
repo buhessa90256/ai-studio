@@ -101,6 +101,7 @@ html[data-ui="v2"] main { max-width: 1180px; padding: 16px; }
 .pj-card { overflow: hidden; padding: 0 } .pj-card .ds-thumb { border-radius: 0; aspect-ratio: 16 / 10 } .pj-card.portrait .ds-thumb { aspect-ratio: 9 / 12 }
 .pj-card .in { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px } .pj-card b { font-size: 15px }
 .ws { display: flex; flex-direction: column; gap: 12px; min-height: calc(100vh - 150px) }
+.ws > *, #ws-root { min-width: 0; max-width: 100% } .ws-pipe, .ws-rail, .ds-chips, .ds-seg { max-width: 100% }
 .ws-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap }
 .ws-head .t { flex: 1; min-width: 0 } .ws-head h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .ws-pipe { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0 } .ws-pipe::-webkit-scrollbar { display: none }
@@ -120,16 +121,17 @@ html[data-ui="v2"] main { max-width: 1180px; padding: 16px; }
 .ws-sec { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden } .ws-sec > summary { list-style: none; cursor: pointer; padding: 14px 16px; font-weight: 650; font-size: 14.5px; display: flex; align-items: center; justify-content: space-between }
 .ws-sec > summary::-webkit-details-marker { display: none } .ws-sec > summary::after { content: "⌄"; color: var(--muted); transition: transform .2s } .ws-sec[open] > summary::after { transform: rotate(180deg) } .ws-sec .in { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px }
 .ws-bar { position: sticky; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); z-index: 15; display: flex; gap: 8px; padding: 10px; margin: 0 -4px; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow) }
-.ws-bar .ds-btn { flex: 1 } .ws-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px } .ws-stats div { background: var(--panel2); border-radius: 12px; padding: 10px 12px; font-size: 12px; color: var(--muted) } .ws-stats b { display: block; color: var(--ink); font-size: 13.5px; margin-top: 2px }
+.ws-bar .ds-btn { flex: 1 1 0; min-width: 0; padding: 0 10px } .ws-bar .ds-btn.icon { flex: none; width: 44px; padding: 0 } .ws-bar { flex-wrap: wrap } .ws-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px } .ws-stats div { background: var(--panel2); border-radius: 12px; padding: 10px 12px; font-size: 12px; color: var(--muted) } .ws-stats b { display: block; color: var(--ink); font-size: 13.5px; margin-top: 2px }
 @media (min-width: 760px) { .ws-body { grid-template-columns: 150px minmax(0, 1fr) } .ws-rail { flex-direction: column; overflow: auto; max-height: calc(100vh - 230px); scroll-snap-type: none } .ws-sc { width: 100% } .ws-panel { grid-column: 1 / -1 } .ws-bar { position: static; background: none; border: 0; padding: 0; box-shadow: none; backdrop-filter: none } .ws-bar .ds-btn { flex: none } }
 @media (min-width: 1180px) { .ws-body { grid-template-columns: 190px minmax(0, 1fr) 360px } .ws-panel { grid-column: auto; max-height: calc(100vh - 210px); overflow: auto } .ws-rail { max-height: calc(100vh - 210px) } }
 .ws-legacy { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px; min-width: 0 }
 .ws-legacy .sp-bar > h2, .ws-legacy .sp-bar > select { display: none }
 
 /* ------------------------------------------------------------------ Frame review */
-.rv { position: fixed; inset: 0; z-index: 140; background: #08080b; display: flex; flex-direction: column; animation: ds-fade .18s }
+.rv { position: fixed; inset: 0; height: 100dvh; z-index: 140; background: #08080b; display: flex; flex-direction: column; animation: ds-fade .18s }
 .rv-top { display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px; border-bottom: 1px solid var(--line) }
-.rv-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) } @media (min-width: 980px) { .rv-main { grid-template-columns: minmax(0, 1fr) 360px } }
+.rv-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 56%) minmax(0, 1fr); overflow: hidden } @media (min-width: 980px) { .rv-main { grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: minmax(0, 1fr) } }
+.rv-stage, .rv-side { min-height: 0 } .rv-side { overflow: auto }
 .rv-stage { position: relative; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; background: #000 }
 .rv-stage img { max-width: 100%; max-height: 100%; user-select: none; -webkit-user-drag: none; transform-origin: center; will-change: transform; object-fit: contain }
 .rv-cmp { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center } .rv-cmp img { position: absolute; max-width: 100%; max-height: 100% }
@@ -151,7 +153,7 @@ html[data-ui="v2"] #v-studio #studio-main { padding: 0 }
 html[data-ui="v2"] #v-studio .card, html[data-ui="v2"] .sp-box { background: var(--panel); border-color: var(--line); border-radius: var(--radius) }
 html[data-ui="v2"] .sp-btn { border-radius: 10px; min-height: 36px } html[data-ui="v2"] .sp-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
 html[data-ui="v2"] #v-home .tile { background: var(--panel); border-radius: var(--radius) }
-html[data-ui="v2"] #chat-sync { background: var(--panel); border-radius: 14px; margin: 0 0 12px }
+html[data-ui="v2"] #chat-sync { display: none !important }  /* chat sync status lives on Home and in Settings */
 html[data-ui="v2"] .sheet { background: var(--bg) }
 /* no horizontal overflow, ever */
 html[data-ui="v2"] body, html[data-ui="v2"] main, html[data-ui="v2"] section { max-width: 100vw } html[data-ui="v2"] img, html[data-ui="v2"] video, html[data-ui="v2"] canvas { max-width: 100% }

@@ -105,4 +105,5 @@
       }
     }
   }
+  window.SP.use = Object.assign(window.SP.use || {}, { flows: pid => { W.projectId = pid; return loaders.studioflows(); } });
 })();

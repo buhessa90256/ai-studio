@@ -55,6 +55,7 @@
       if (e.altKey && !e.ctrlKey && !e.metaKey) { const k = { "1": "/home", "2": "/projects", "3": "/library", "4": "/settings" }[e.key]; if (k) { e.preventDefault(); go(k); } }
       if (e.key === "?" ) APP.toast("Shortcuts: Alt+1 Home · Alt+2 Projects · Alt+3 Library · Alt+4 Settings · ←/→ scenes · A approve · R regenerate · Esc close", "", 7000);
     });
+    APP.refreshGpu(true).catch(() => {});
     APP.emit("shell:ready");
   }
 })();

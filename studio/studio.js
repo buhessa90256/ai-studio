@@ -341,6 +341,7 @@
       return true;
     },
   };
+  Object.assign(window.SP, { openAsset, editCharacter, editProject, AS, TYPES });
 })();
 
 

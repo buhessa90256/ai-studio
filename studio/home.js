@@ -30,6 +30,7 @@
         h("div", { class: "hm-hero" },
           h("div", {}, h("h1", { class: "ds-h" }, "Your studio"), h("div", { class: "ds-sub" }, projects.length ? `${projects.length} project${projects.length === 1 ? "" : "s"}${review.length ? " · " + review.length + " frame" + (review.length === 1 ? "" : "s") + " waiting for you" : ""}` : "Make your first movie")),
           h("div", { class: "ds-row" }, h("button", { class: "ds-btn", onclick: () => APP.go("/create") }, icon("sparkle"), "Quick create"), h("button", { class: "ds-btn pri", onclick: () => newProject() }, icon("plus"), "New project"))),
+        APP.LS.get("connector_url", "") ? h("div", { class: "ds-row ds-wrap", style: "margin-top:10px;gap:8px" }, h("span", { class: "ds-pill ok" }, icon("link"), "Chat connected"), h("span", { class: "ds-small" }, (() => { const t = Number(APP.LS.get("connector_last", 0)); return t ? "synced " + ago(t / 1000) : "not synced yet"; })()), h("button", { class: "ds-btn sm ghost", onclick: async ev => { ev.currentTarget.disabled = true; try { await APP.syncNow(); APP.toast("Synced with your chat", "ok"); } catch (e) { APP.fail(e, "Sync"); } draw(); } }, icon("refresh"), "Sync now")) : null,
         h("div", { class: "hm-stats", style: "margin-top:14px" },
           statCard("GPU", g.label.replace("GPU ", ""), g.detail, gpuPill(g)),
           statCard("RunPod credit", g.balance != null ? money(g.balance) : "–", g.balance != null ? (g.perHour ? money(g.perHour) + "/hour right now" : "Not spending now") : "Open AI Studio on your PC once to show it"),
@@ -63,7 +64,7 @@
     async function newProject() {
       const chars = await APP.chars().catch(() => []);
       APP.sheet((box, close) => {
-        const name = h("input", { class: "ds-input", placeholder: "Project name", maxlength: 120 }), aspect = h("div", { class: "ds-seg" }, ["9:16", "16:9", "1:1"].map((a, i) => h("button", { type: "button", class: i === 0 ? "on" : "", "data-a": a, onclick: e => { [...aspect.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); } }, a === "9:16" ? "9:16 portrait" : a === "16:9" ? "16:9 wide" : "1:1 square")));
+        const name = h("input", { class: "ds-input", placeholder: "Project name", maxlength: 120 }), aspect = h("div", { class: "ds-seg" }, ["9:16", "16:9", "1:1"].map((a, i) => h("button", { type: "button", class: a === APP.LS.get("def_aspect", "9:16") ? "on" : "", "data-a": a, onclick: e => { [...aspect.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); } }, a === "9:16" ? "9:16 portrait" : a === "16:9" ? "16:9 wide" : "1:1 square")));
         const picked = new Set(); const pick = h("div", { class: "ds-chips", style: "flex-wrap:wrap" }, chars.map(c => h("button", { type: "button", class: "ds-chip", onclick: e => { picked.has(c.id) ? picked.delete(c.id) : picked.add(c.id); e.currentTarget.classList.toggle("on", picked.has(c.id)); } }, c.name)));
         box.append(h("h2", { class: "ds-h2", style: "font-size:18px;margin-bottom:12px" }, "New project"), h("div", { class: "ds-stack" },
           h("div", { class: "ds-field" }, h("label", {}, "Name"), name), h("div", { class: "ds-field" }, h("label", {}, "Shape (kept for every frame, video and export)"), aspect),

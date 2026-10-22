@@ -89,7 +89,10 @@
           if (kind !== "video") {  // check the shape of the new start frame; videos are always fed a correctly shaped copy (see makeVideo)
             try { const [pw, ph] = SIZE[S.project.aspect] || SIZE["16:9"], [iw, ih] = await imageSize(asset.url || ("/media/" + asset.id)); if (!sameShape(iw, ih, pw, ph)) note = `Note: this start frame is ${iw}x${ih} but the project is ${S.project.aspect}. It will be fitted without stretching (background extended) when the video is made.`; } catch {}
           }
-          sc = await patch(sc, kind === "video" ? { video_asset: asset.id, status: "done", error: "" } : { start_asset: asset.id, status: "keyframe_ready", error: note });
+          const hist = ((sc.settings || {}).frame_history || []).slice(-11);   // every start frame stays available (previous versions, compare, rollback)
+          if (kind !== "video" && sc.start_asset && !hist.some(x => x.asset === sc.start_asset)) hist.push({ v: hist.length + 1, asset: sc.start_asset, at: Date.now() / 1000 });
+          if (kind !== "video") hist.push({ v: hist.length + 1, asset: asset.id, at: Date.now() / 1000 });
+          sc = await patch(sc, kind === "video" ? { video_asset: asset.id, status: "done", error: "" } : { start_asset: asset.id, status: "keyframe_ready", error: note, settings: { ...(sc.settings || {}), frame_history: hist, review: "" } });
           break;
         }
         if (r.error) { sc = await patch(sc, { status: String(r.error).toLowerCase().includes("cancel") ? "cancelled" : "failed", error: String(r.error).slice(0, 300) }); break; }
@@ -120,7 +123,7 @@
     if (!sc.start_asset) throw new Error("This scene needs a start frame first.");
     const [w, hh] = SIZE[S.project.aspect] || SIZE["16:9"];
     const p = await api(`scenes/${sc.id}/prompt`);
-    const params = { prompt: p.video_prompt, image: await fitToShape(sc.start_asset_url, w, hh), width: w, height: hh, seconds: sc.duration, quality: "high" };  // exactly the video's shape: the model must not resize (stretch) it
+    const params = { prompt: p.video_prompt, image: await fitToShape(sc.start_asset_url, w, hh), width: w, height: hh, seconds: sc.duration, quality: ((sc.settings || {}).quality === "fast" ? "fast" : "high") };  // exactly the video's shape: the model must not resize (stretch) it
     if (sc.end_asset) params.last_image = await fitToShape(sc.end_asset_url, w, hh);
     const job = await generate({ tool: "minimax_h3", params });
     sc = await patch(sc, { status: "generating", job_id: job, error: "" });
@@ -287,6 +290,11 @@
     },
     scenes: () => S.scenes,
     async approve(v) { await setApproved(v); },
+    // used by the project workspace (same functions as the old buttons, addressed by scene id)
+    async frame(id) { const sc = S.scenes.find(x => x.id === id); if (!sc) throw new Error("Scene not found."); await makeKeyframe(sc); },
+    async video(id) { const sc = S.scenes.find(x => x.id === id); if (!sc) throw new Error("Scene not found."); await makeVideo(sc); },
+    async enhanceOne(id) { const sc = S.scenes.find(x => x.id === id); if (!sc) throw new Error("Scene not found."); await enhanceScene(sc); },
+    planDialog: () => planDialog(), importDialog: () => importDialog(),
   };
 
   function planDialog() {

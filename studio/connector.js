@@ -11,7 +11,8 @@
 
   try {  // a link from the chat: ...?connector=<address>
     const u = new URL(location.href), c = u.searchParams.get("connector");
-    if (c) { if (ok(c)) store.set(KEY, c); u.searchParams.delete("connector"); history.replaceState(null, "", u.pathname + (u.search || "") + u.hash); }
+    const a = u.searchParams.get("act");
+    if (c) { if (ok(c)) store.set(KEY, c); if (a && /^https:\/\/[^\s/]+\/act\/[A-Za-z0-9]{20,}$|^http:\/\/(127\.0\.0\.1|localhost):\d+\/act\/[A-Za-z0-9]{20,}$/.test(a)) store.set("connector_act", a); else store.del("connector_act"); u.searchParams.delete("connector"); u.searchParams.delete("act"); history.replaceState(null, "", u.pathname + (u.search || "") + u.hash); }
   } catch {}
 
   const wait = setInterval(() => {  // the Studio screens (window.SP) load after this file
@@ -89,7 +90,14 @@
       const scenes = (await api("scenes?project=" + p.id)).items;
       for (const s of d.scenes) {
         const ls = scenes.find(x => x.settings && x.settings.cn === s.scene_number);
-        const settings = { ...(ls ? ls.settings : {}), cm: d.movie_id, cn: s.scene_number };
+        const settings = { ...(ls ? ls.settings : {}), cm: d.movie_id, cn: s.scene_number, cstate: s.state,
+          cidentity: s.identity ? { overall: s.identity.overall, chars: Object.fromEntries(Object.entries(s.identity.characters || {}).map(([n, v]) => [n, { score: v.score, verdict: v.verdict }])) } : null,
+          cattempts: (s.frame_attempts || []).map(a => ({ n: a.attempt, method: a.method, verdict: a.verdict, reasons: a.reasons || [] })),
+          cwarn: s.frame_warning || "", cversions: (s.frame_versions || []).map(x => ({ v: x.version, url: x.url })) };
+        const lastTry = (s.frame_attempts || []).slice(-1)[0];
+        settings.cflags = lastTry && lastTry.verdict !== "pass" ? (lastTry.reasons || []).slice(0, 4) : [];
+        if (["frame_awaiting_approval", "frame_rejected"].includes(s.state)) settings.review = settings.review === "rejected" || s.state === "frame_rejected" ? "rejected" : "pending";
+        else if (["frame_done", "video_waiting", "video_generating", "video_done"].includes(s.state)) settings.review = "approved";
         const body = { project_id: p.id, title: "Scene " + s.scene_number, action: s.action, location: s.location || "", time_of_day: s.time_of_day || "", lighting: s.lighting || "", props: s.props || "",
           camera: s.camera || "", dialogue: s.dialogue || "", sfx: s.sound || "", duration: (s.settings && s.settings.seconds) || 6,
           characters: (s.characters || []).map(n => (localChars.find(c => c.name.toLowerCase() === String(n).toLowerCase()) || {}).id).filter(Boolean),
@@ -97,7 +105,8 @@
           purpose: s.state === "frame_awaiting_approval" ? "Waiting for your approval in the chat" + (s.identity ? " (face check: " + s.identity.overall + ")" : "") : (s.identity ? "Face check: " + s.identity.overall : "") };
         if (ls) body.id = ls.id;
         if (s.keyframe_url && settings.kv !== s.versions.frame) {
-          try { const a = await addAsset(`${slug(d.title)}_s${s.scene_number}_frame_v${s.versions.frame}.png`, await download(s.keyframe_url), "image", ["from chat"]); body.start_asset = a.id; settings.kv = s.versions.frame; } catch (e) { console.warn(e); }
+          try { const a = await addAsset(`${slug(d.title)}_s${s.scene_number}_frame_v${s.versions.frame}.png`, await download(s.keyframe_url), "image", ["from chat"]); body.start_asset = a.id; settings.kv = s.versions.frame;
+            const hist = (settings.frame_history || []).slice(); if (!hist.some(x => x.v === s.versions.frame)) hist.push({ v: s.versions.frame, asset: a.id, at: Date.now() / 1000 }); settings.frame_history = hist.slice(-12); } catch (e) { console.warn(e); }
         }
         if (s.clip_url && settings.cv !== s.versions.clip) {
           try { const a = await addAsset(`${slug(d.title)}_s${s.scene_number}_v${s.versions.clip}.mp4`, await download(s.clip_url), "video", ["from chat"]); body.video_asset = a.id; settings.cv = s.versions.clip; } catch (e) { console.warn(e); }
@@ -132,6 +141,7 @@
       finally { busy = false; syncBtn.disabled = false; }
     }
     draw();
+    window.__connectorSync = () => run(true);
     if (base()) setTimeout(() => run(false), 1500);
     setInterval(() => { if (document.visibilityState === "visible" && base() && Date.now() - last > 60000 && document.getElementById("studio-main")?.offsetParent) run(false); }, 30000);
   }
