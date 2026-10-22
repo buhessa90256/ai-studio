@@ -158,7 +158,7 @@
     }
 
     // ------------------------------------------------------------------ Storyboard gallery: 9:16 cells, lazy small thumbnails, tap = full-screen viewer with the ORIGINAL picture
-    const shortStatus = info => info.key === "failed" ? ["Needs fix", "bad"] : info.busy ? ["Generating", "run"] : info.hasVideo ? ["Video", "ok"] : info.key === "rejected" ? ["Rejected", "bad"] : info.approved ? ["Approved", "ok"] : info.hasFrame ? ["To review", "warn"] : info.key === "draft" ? ["Draft", ""] : ["No frame", ""];
+    const shortStatus = info => info.key === "failed" ? ["Needs fix", "bad"] : info.busy ? ["Generating", "run"] : info.hasVideo ? ["Video", "ok"] : info.key === "rejected" ? ["Rejected", "bad"] : info.approved ? ["Approved", "ok"] : info.hasFrame ? ["To review", "warn"] : info.key === "draft" ? ["Draft", ""] : info.key === "await_import" ? ["Needs picture", "warn"] : ["No frame", ""];
     function viewerItems(filterFn) {
       const p = ws.project, out = [];
       ws.scenes.forEach((s, i) => { if (!s.start_asset_url || (filterFn && !filterFn(s))) return; const info = APP.sceneInfo(s, p), [lab, tone] = shortStatus(info); out.push({ url: s.start_asset_url, thumb: APP.thumbPeek ? APP.thumbPeek("a" + s.start_asset, 360) : "", title: `Scene ${i + 1}${s.title && !/^scene \d+$/i.test(s.title.trim()) ? " · " + s.title : ""}`, status: lab, tone, scene: s, id: s.id, filename: `scene-${i + 1}` }); });
@@ -186,7 +186,7 @@
       const bar = h("div", { class: "gl-bar", role: "tablist", "aria-label": "Filter scenes" }, F.map(([k, l]) => h("button", { type: "button", role: "tab", class: "ds-chip" + (k === cur ? " on" : ""), "aria-selected": k === cur, onclick: () => { ws.glFilter = k; draw(); } }, `${l} ${cnt(k)}`)));
       const shown = scenes.map((s, i) => [s, i]).filter(([s, i]) => pred(infos[i]));
       const grid = h("div", { class: "gl-grid", role: "list" }, shown.map(([s, i]) => cell(s, i, p, () => { if (s.start_asset_url) openViewer(s); else { ws.sceneId = s.id; go("scenes"); } })));
-      body.append(window.APP && APP.live ? APP.live.card(p) : null, window.BULK ? window.BULK.bar({ project: p, scenes, refresh: () => refresh(true), redraw: () => draw() }) : null, bar, shown.length ? grid : h("div", { class: "ds-empty" }, "No scenes in this filter."), h("div", { class: "ds-small", style: "text-align:center" }, "Tap a picture to see it full screen. Pinch or double-tap to zoom."));
+      body.append(window.APP && APP.live ? APP.live.card(p) : null, window.IMP ? IMP.card(p, scenes, { actions, chars: ws.chars, refresh: () => refresh(true) }) : null, window.BULK ? window.BULK.bar({ project: p, scenes, refresh: () => refresh(true), redraw: () => draw() }) : null, bar, shown.length ? grid : h("div", { class: "ds-empty" }, "No scenes in this filter."), h("div", { class: "ds-small", style: "text-align:center" }, "Tap a picture to see it full screen. Pinch or double-tap to zoom."));
     }
     function videosMode(body) {
       const { project: p, scenes } = ws; if (!scenes.length) return emptyScenes(body);
@@ -340,12 +340,15 @@
       async plan() { await window.SP.sb.use(ws.pid); window.SP.sb.planDialog(); },
       async importScenes() { await window.SP.sb.use(ws.pid); window.SP.sb.importDialog(); },
       async frame(sc) {
+        if (window.IMP && IMP.gpuFramesBlocked(ws.project)) return IMP.sheet(ws.project, sc, { refresh: () => refresh(true), scenes: ws.scenes });   // "ChatGPT Storyboard Import": the replacement is imported, never made on the GPU
         if (viaChat(sc)) return APP.chatAct("regenerate", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!(await APP.confirm(info.hasFrame ? "Make a new start frame?" : "Make the start frame?", `Uses the GPU (about ${APP.money(APP.estimate(sc, "frame"))} of RunPod credit).${info.hasFrame ? " The current frame stays in Frame versions." : ""}${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "frame")) : ""}${APP.gpu.state === "asleep" ? "\nThe GPU is asleep and needs about 5 minutes to wake." : ""}`, "Generate"))) return;
         kick("frame:" + sc.id, "Start frame", async () => { await window.SP.sb.use(ws.pid); await window.SP.sb.frame(sc.id); });
         APP.toast("Making the start frame. You can leave this page; it keeps going.", "ok");
       },
+      async import(sc) { if (window.IMP) IMP.sheet(ws.project, sc, { refresh: () => refresh(true), scenes: ws.scenes }); },
+      async importMany() { if (window.IMP) IMP.bulk(ws.project, ws.scenes, { refresh: () => refresh(true) }); },
       async video(sc) {
         if (viaChat(sc)) return APP.chatAct("approve", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);

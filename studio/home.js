@@ -65,14 +65,17 @@
       const chars = await APP.chars().catch(() => []);
       APP.sheet((box, close) => {
         const name = h("input", { class: "ds-input", placeholder: "Project name", maxlength: 120 }), aspect = h("div", { class: "ds-seg" }, ["9:16", "16:9", "1:1"].map((a, i) => h("button", { type: "button", class: a === APP.LS.get("def_aspect", "9:16") ? "on" : "", "data-a": a, onclick: e => { [...aspect.children].forEach(b => b.classList.remove("on")); e.target.classList.add("on"); } }, a === "9:16" ? "9:16 portrait" : a === "16:9" ? "16:9 wide" : "1:1 square")));
+        let imgSrc = "ai"; const SRCS = (window.IMP && IMP.SOURCES) || [["ai", "AI Studio GPU", ""]], srcHint = h("div", { class: "ds-small", style: "margin-top:6px" }, SRCS[0][2]);
+        const srcSel = h("div", { class: "ds-seg", role: "group", "aria-label": "Storyboard image source" }, SRCS.map(([k, l, d], i) => h("button", { type: "button", class: i === 0 ? "on" : "", onclick: e => { imgSrc = k; [...srcSel.children].forEach(b => b.classList.remove("on")); e.currentTarget.classList.add("on"); srcHint.textContent = d; } }, l)));
         const picked = new Set(); const pick = h("div", { class: "ds-chips", style: "flex-wrap:wrap" }, chars.map(c => h("button", { type: "button", class: "ds-chip", onclick: e => { picked.has(c.id) ? picked.delete(c.id) : picked.add(c.id); e.currentTarget.classList.toggle("on", picked.has(c.id)); } }, c.name)));
         box.append(h("h2", { class: "ds-h2", style: "font-size:18px;margin-bottom:12px" }, "New project"), h("div", { class: "ds-stack" },
           h("div", { class: "ds-field" }, h("label", {}, "Name"), name), h("div", { class: "ds-field" }, h("label", {}, "Shape (kept for every frame, video and export)"), aspect),
+          SRCS.length > 1 ? h("div", { class: "ds-field" }, h("label", {}, "Storyboard image source"), srcSel, srcHint) : null,
           chars.length ? h("div", { class: "ds-field" }, h("label", {}, "Characters"), pick) : null,
           h("div", { class: "ds-row" }, h("button", { class: "ds-btn ghost", style: "flex:1", onclick: close }, "Cancel"), h("button", { class: "ds-btn pri", style: "flex:1", onclick: async () => {
             if (!name.value.trim()) { name.focus(); return APP.toast("Give the project a name."); }
             const a = aspect.querySelector(".on").dataset.a;
-            try { const p = await APP.saveProject({}, { name: name.value.trim(), aspect: a, resolution: a === "9:16" ? "768x1344" : a === "1:1" ? "1024x1024" : "1344x768", duration: 30, characters: [...picked], story: "", description: "", data: {} }); close(); APP.go("/projects/" + p.id); } catch (e) { APP.fail(e, "Could not create the project"); } } }, "Create"))));
+            try { const p = await APP.saveProject({}, { name: name.value.trim(), aspect: a, resolution: a === "9:16" ? "768x1344" : a === "1:1" ? "1024x1024" : "1344x768", duration: 30, characters: [...picked], story: "", description: "", data: imgSrc === "ai" ? {} : { image_source: imgSrc } }); close(); APP.go("/projects/" + p.id); } catch (e) { APP.fail(e, "Could not create the project"); } } }, "Create"))));
       });
     }
     APP.newProject = newProject;

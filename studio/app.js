@@ -89,6 +89,7 @@
     else if (hasFrame && review === "rejected") { key = "rejected"; label = "Frame rejected"; tone = "bad"; }
     else if (hasFrame && !approved) { key = "review"; label = "Needs your review"; tone = "warn"; }
     else if (hasFrame) { key = "approved"; label = "Frame approved"; tone = "ok"; }
+    else if (st.cstate === "frame_awaiting_import") { key = "await_import"; label = "Waiting for your picture"; tone = "warn"; }
     else if (sc.action) { key = "draft"; label = "Ready for a frame"; }
     const flags = (st.cflags || []).filter(Boolean);
     return { key, label, tone, hasFrame, hasVideo, approved, review, identity: idv, flags, busy: busyFrame || busyVideo, cost: APP.estimate(sc, hasFrame ? "clip" : "both"), fromChat: !!st.cm, version: (st.frame_history || []).length || st.kv || 1 };

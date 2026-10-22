@@ -51,7 +51,7 @@
       if (styled) return; styled = true;
       document.head.append(h("style", {}, `
 #live.live-ok .dot{background:#3fbf7f}#live.live-warn .dot{background:#e0a84a}#live.live-bad .dot{background:#e5594b}#live.live-idle .dot{background:#8a8a96}
-#live{display:inline-flex;align-items:center;gap:6px}#live .dot{width:9px;height:9px;border-radius:50%;flex:none}
+#live{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none}@media (max-width:420px){#live.has-d .lv-l,#live.has-d .lv-s{display:none}}#live .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .lv{border:1px solid var(--line,#3a3a48);border-radius:14px;padding:12px;margin:0 0 12px;background:var(--card,rgba(127,127,127,.08));font-size:14px}
 .lv-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:space-between}.lv-h b{font-size:15px}.lv-mut{opacity:.72}.lv-ok{color:#3fbf7f}.lv-warn{color:#e0a84a}.lv-bad{color:#e5594b}
 .lv-bar{height:8px;border-radius:9px;background:rgba(127,127,127,.25);overflow:hidden;margin:8px 0}.lv-bar i{display:block;height:100%;background:var(--acc,#7c6cf0);transition:width .6s}
@@ -69,8 +69,8 @@
       const on = !!base();
       pill.hidden = !on; if (!on) return;
       const txt = pill.querySelector("#live-txt"), wait = S.nextAt ? Math.max(0, Math.round((S.nextAt - Date.now()) / 1000)) : 0;
-      const m = { connected: ["live-ok", "Live" + (S.last ? " · " + ago() : "")], reconnecting: ["live-warn", "Reconnecting" + (S.fails ? " · retry " + wait + " s" : "")], offline: ["live-bad", "Offline"], idle: ["live-idle", "Live"] }[S.status] || ["live-idle", "Live"];
-      pill.className = "gpu " + m[0]; txt.textContent = m[1];
+      const m = { connected: ["live-ok", "Live", S.last ? ago() : ""], reconnecting: ["live-warn", "Reconnecting", S.fails ? "retry " + wait + " s" : ""], offline: ["live-bad", "Offline", ""], idle: ["live-idle", "Live", ""] }[S.status] || ["live-idle", "Live", ""];
+      pill.className = "gpu " + m[0] + (m[2] ? " has-d" : ""); txt.replaceChildren(h("span", { class: "lv-l" }, m[1]), m[2] ? h("span", { class: "lv-s" }, " · ") : "", m[2] ? h("span", { class: "lv-d" }, m[2]) : ""); pill.setAttribute("aria-label", m[1] + (m[2] ? ", " + m[2] : ""));   // narrow phones show only the detail ("2 s ago"): the coloured dot already says connected / reconnecting
       pill.title = S.status === "connected" ? "Connected to your connector. Last updated " + clock(S.last) + "." + (visible() ? "" : "") : S.status === "offline" ? "No internet connection. It reconnects by itself." : S.status === "reconnecting" ? "Could not reach the connector (" + S.error + "). Trying again with a growing pause." : "Not polling yet.";
     }
     let paintTimer = null;
