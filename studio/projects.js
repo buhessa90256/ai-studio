@@ -57,7 +57,7 @@
     const cur = () => (ws && ws.scenes.find(s => s.id === ws.sceneId)) || null;
     const ctx = () => ({ refresh, project: ws.project, scenes: ws.scenes, actions });
     async function refresh() { if (!ws) return; const [project, scenes] = await Promise.all([APP.project(ws.pid), APP.scenes(ws.pid, true)]); if (!ws || !project) return; ws.project = project; ws.scenes = scenes; if (!scenes.some(s => s.id === ws.sceneId)) ws.sceneId = (scenes[0] || {}).id || ""; draw(); }
-    function startPoll() { stopPoll(); poll = setInterval(() => { if (document.visibilityState === "visible" && ws && ws.scenes.some(s => APP.sceneInfo(s).busy)) refresh().catch(() => {}); }, 5000); }
+    function startPoll() { stopPoll(); poll = setInterval(() => { if (document.visibilityState === "visible" && ws && (ws.scenes.some(s => APP.sceneInfo(s).busy) || (ws.kickUntil || 0) > Date.now())) refresh().catch(() => {}); }, 5000); }
     function stopPoll() { if (poll) clearInterval(poll); poll = null; }
     function pick(id) { ws.sceneId = id; APP.state.sceneId = id; history.replaceState(null, "", `#/projects/${ws.pid}/${ws.mode}/${id}`); draw(); }
     function setMode(m) { APP.go(`/projects/${ws.pid}/${m}${ws.sceneId ? "/" + ws.sceneId : ""}`); }
@@ -197,6 +197,13 @@
     }
 
     // ------------------------------------------------------------------ actions (everything that can cost money asks first, and never runs by itself)
+    // start a GPU job without freezing the screen: the job runs in the background, the workspace shows its progress and a toast announces the result
+    function kick(key, label, starter) {
+      ws.kickUntil = Date.now() + 90000;
+      const p = APP.once(key, async () => { try { await starter(); APP.toast(label + " is ready.", "ok"); } catch (e) { APP.fail(e, label); } finally { try { await refresh(); } catch {} } });
+      [1500, 4000, 9000].forEach(ms => setTimeout(() => refresh().catch(() => {}), ms));
+      return p;
+    }
     const actions = {
       async addScene() { try { const s = await api("scenes", { project_id: ws.pid, title: "New scene", characters: ws.project.characters }); ws.sceneId = s.id; APP.changed("scenes"); await refresh(); } catch (e) { APP.fail(e, "Could not add the scene"); } },
       async plan() { await window.SP.sb.use(ws.pid); window.SP.sb.planDialog(); },
@@ -205,14 +212,16 @@
         if (sc.settings && sc.settings.cm) return APP.chatAct("regenerate", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!(await APP.confirm(info.hasFrame ? "Make a new start frame?" : "Make the start frame?", `Uses the GPU (about ${APP.money(APP.estimate(sc, "frame"))} of RunPod credit).${info.hasFrame ? " The current frame stays in Frame versions." : ""}${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "frame")) : ""}${APP.gpu.state === "asleep" ? "\nThe GPU is asleep and needs about 5 minutes to wake." : ""}`, "Generate"))) return;
-        await APP.once("frame:" + sc.id, async () => { try { await window.SP.sb.use(ws.pid); await window.SP.sb.frame(sc.id); APP.toast("Start frame is being made. You can leave this page.", "ok"); } catch (e) { APP.fail(e, "Start frame"); } await refresh(); });
+        kick("frame:" + sc.id, "Start frame", async () => { await window.SP.sb.use(ws.pid); await window.SP.sb.frame(sc.id); });
+        APP.toast("Making the start frame. You can leave this page; it keeps going.", "ok");
       },
       async video(sc) {
         if (sc.settings && sc.settings.cm) return APP.chatAct("approve", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!info.approved) return APP.toast("Approve the start frame first.");
         if (!(await APP.confirm("Make the video?", `Uses the GPU for about 7 minutes (about ${APP.money(APP.estimate(sc, "clip"))} of RunPod credit). This only starts because you pressed Generate.${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "clip")) : ""}`, "Generate video"))) return;
-        await APP.once("video:" + sc.id, async () => { try { await window.SP.sb.use(ws.pid); await window.SP.sb.video(sc.id); APP.toast("Video is being made.", "ok"); } catch (e) { APP.fail(e, "Video"); } await refresh(); });
+        kick("video:" + sc.id, "Video", async () => { await window.SP.sb.use(ws.pid); await window.SP.sb.video(sc.id); });
+        APP.toast("Making the video (about 7 minutes). You can leave this page; it keeps going.", "ok");
       },
       async approve(sc) {
         if (sc.settings && sc.settings.cm) return APP.chatAct("approve", sc, ws.project);

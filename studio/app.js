@@ -130,7 +130,7 @@
   document.addEventListener("error", e => {
     const el = e.target; if (!el || el.tagName !== "IMG" || !el.closest(".ds-thumb, .rv-ver") || el.dataset.failed) return;
     el.dataset.failed = "1"; const box = el.closest(".ds-thumb") || el.parentElement; el.style.display = "none";
-    if (!box.querySelector(".ds-broken")) { const b = h("div", { class: "ds-broken", title: "Tap to try again", onclick: ev => { ev.stopPropagation(); b.remove(); el.style.display = ""; delete el.dataset.failed; const u = el.src; el.src = ""; el.src = u; } }, icon("warn"), h("span", {}, "Could not load")); box.append(b); }
+    if (!box.querySelector(".ds-broken")) { const b = h("div", { class: "ds-broken", title: "Tap to try again", onclick: ev => { ev.stopPropagation(); b.remove(); el.style.display = ""; delete el.dataset.failed; const u = el.src; el.src = ""; el.src = u; } }, APP.icon("warn"), h("span", {}, "Could not load")); box.append(b); }
   }, true);
   APP.budgetNote = cost => {
     const lim = Number(LS.get("limit_day", 0)) || 0; if (!lim) return "";

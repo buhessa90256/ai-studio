@@ -29,6 +29,16 @@ so keep explanations short and in plain language: what changed, how to see it, n
 
 - **Chat connector sync** (`studio/connector.js`): a link from the chat (`?connector=<address>/ro/<read-only token>`) is kept in localStorage; it copies characters, movies (as projects), frames, clips and final movies from the owner's connector into this device. Read-only; never put the address or token in the repo.
 
+## Interface v2 (2026-10, default)
+Four sections (Home, Projects, Library, Settings) instead of the old Create/Studio/Results/Settings + 10 Studio tabs. Files in `studio/`: `ds.css` (design system: dark charcoal + violet, `html[data-ui="v2"]`),
+`app.js` (shared state `window.APP`: selection, cached data, GPU/credit classification running/idle/starting/asleep/unavailable, toasts/sheets, scene status rules `APP.sceneInfo`),
+`shell.js` (nav + hash routes `#/home #/projects/<id>/<mode>/<sceneId>[/review] #/library/<filter> #/settings/<section> #/create`), `home.js`, `projects.js` (project list + workspace: scene rail / preview /
+properties; modes Storyboard + Director native, Editor + Automation = the old `editor.js` / `flows.js` / queue screens mounted inside the workspace through `SP.use.editor/flows`), `review.js` (frame review: zoom, versions, compare,
+automatic checks incl. a browser collage/split-screen detector `APP.collageScan`, approve/reject/regenerate; chat frames use `APP.chatAct` with the connector's action link), `library.js`, `settings2.js`.
+The old screens and all data code are unchanged underneath. **Rollback:** `?ui=classic` (remembered) restores the old interface, `?ui=v2` returns. Nothing paid ever starts by itself: every GPU step has its own button + cost confirmation.
+Start frames made in the app use separate reference pictures + the single-frame prompt (`storyboard.js makeKeyframe`, mirrors the connector's `framegen.py`), are checked for collage/wrong shape before they can be approved, and retried up to 3 times.
+Testing the app without a RunPod key: `localStorage.apikey = JSON.stringify("x")`, `localStorage.dev_runpod_base = JSON.stringify("http://127.0.0.1:8099")` and run `connector/dev_fake_runpod.py` (fake GPU, CORS open; `FAKE_KEY_MODE=collage_then_ok` exercises the retry).
+
 ## Rules that matter
 - `workflows.js` mirrors `workflows.py` of the PC version (not in this repo). Keep node ids, inputs and model file names
   exactly as they are unless asked; a wrong model name fails on the GPU, not here.
