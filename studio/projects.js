@@ -16,7 +16,7 @@
       if (document.getElementById("v-studio").hidden) return;
       const my = ++token, { projectId, mode, sceneId } = APP.state;
       legacy.style.display = "none"; legacy.classList.remove("ws-legacy");
-      try { if (!projectId) { stopPoll(); ws = null; return await list(my); } await workspace(projectId, MODES.some(m => m[0] === mode) ? mode : "storyboard", sceneId, my); }
+      try { if (!projectId) { stopPoll(); ws = null; return await list(my); } await workspace(projectId, mode === "ai" || MODES.some(m => m[0] === mode) ? mode : "ai", sceneId, my); }
       catch (e) { if (my === token) { rootEl.replaceChildren(h("div", { class: "ds-empty" }, icon("warn"), h("b", {}, "Could not open this"), APP.txt(e.message, "Unknown error"), h("button", { class: "ds-btn", onclick: () => APP.go("/projects") }, "Back to projects"))); APP.fail(e); } }
     }
     APP.on("route", () => { if (location.hash.startsWith("#/projects")) renderRoute(); });
@@ -53,6 +53,16 @@
       draw(); startPoll();
       if (APP.state.review && ws.sceneId) { APP.state.review = false; const sc = scenes.find(s => s.id === ws.sceneId); if (sc) APP.openReview(sc, project, ctx()); }
     }
+    // AI Director chat: one node per project, reused by every redraw (so typing and scroll position survive); full size in AI mode, a collapsible dock in Manual mode
+    function chatNode() {
+      if (!window.DIR || !DIR.createChat) { document.addEventListener("dir-ui-ready", () => { if (ws) draw(); }, { once: true }); return h("div", { class: "ds-empty" }, "AI Director is loading…"); }
+      if (!ws.chat || ws.chatPid !== ws.pid) { if (ws.chat && ws.chat.destroy) ws.chat.destroy(); ws.chat = DIR.createChat(ws.pid); ws.chatPid = ws.pid; }
+      return ws.chat;
+    }
+    function dock(chat) {
+      const open = !!ws.dockOpen, wrap = h("div", { class: "dir-dock" + (open ? " open" : "") }, h("button", { type: "button", class: "dir-dock-h", "aria-expanded": open, onclick: () => { ws.dockOpen = !ws.dockOpen; wrap.classList.toggle("open", ws.dockOpen); hd.setAttribute("aria-expanded", ws.dockOpen); } }, icon("film"), "AI Director", h("span", { class: "ds-small", style: "margin-left:auto" }, open ? "Hide" : "Ask the director…")));
+      const hd = wrap.firstChild; wrap.append(h("div", { class: "dir-dock-b" }, chat)); return wrap;
+    }
     const pid_ = () => (ws && ws.pid) || "";
     const cur = () => (ws && ws.scenes.find(s => s.id === ws.sceneId)) || null;
     const ctx = () => ({ refresh, project: ws.project, scenes: ws.scenes, actions });
@@ -70,13 +80,16 @@
         h("div", { class: "t" }, h("h1", {}, txt(p.name, "Untitled project")), h("div", { class: "ds-row ds-wrap", style: "gap:6px;margin-top:3px" }, h("span", { class: "ds-pill" }, p.aspect), h("span", { class: "ds-small" }, `${scenes.length} scene${scenes.length === 1 ? "" : "s"}`), pend ? h("span", { class: "ds-pill warn" }, pend + " to review") : null, ws.scenes.some(s => APP.sceneInfo(s).busy) ? h("span", { class: "ds-pill run" }, h("i"), "Generating") : null)),
         h("button", { class: "ds-btn icon sm", "aria-label": "Project menu", onclick: () => projectMenu() }, icon("dots")));
       const pipe = h("div", { class: "ws-pipe", "aria-label": "Production pipeline" }, pl.steps.map(s => h("span", { class: "ws-step" + (s.done ? " done" : s.cur ? " cur" : "") }, h("i"), s.name)));
-      const seg = h("div", { class: "ds-seg", role: "tablist" }, MODES.map(([k, l]) => h("button", { type: "button", role: "tab", class: mode === k ? "on" : "", "aria-selected": mode === k, onclick: () => setMode(k) }, l)));
+      const top = h("div", { class: "ds-seg dir-top", role: "tablist", "aria-label": "Workspace" }, [["ai", "AI Director"], ["storyboard", "Manual Editor"]].map(([k, l]) => h("button", { type: "button", role: "tab", class: (k === "ai") === (mode === "ai") ? "on" : "", "aria-selected": (k === "ai") === (mode === "ai"), onclick: () => setMode(k) }, l)));
+      const seg = mode === "ai" ? null : h("div", { class: "ds-seg", role: "tablist" }, MODES.map(([k, l]) => h("button", { type: "button", role: "tab", class: mode === k ? "on" : "", "aria-selected": mode === k, onclick: () => setMode(k) }, l)));
       const legacyNow = mode === "editor" || mode === "automation", key = pid_() + ":" + mode;
       if (!legacyNow && legacy.parentElement !== host) host.append(legacy);   // the old screens go back to their hidden home when not in use
       const reuse = legacyNow && ws.legacyBody && ws.legacyKey === key;   // keep the mounted Editor / Workflows screen (and anything not saved yet) untouched by refreshes
       const body = reuse ? ws.legacyBody : h("div", { id: "ws-content" });
       ws.legacyBody = legacyNow ? body : null; ws.legacyKey = legacyNow ? key : "";
-      rootEl.replaceChildren(h("div", { class: "ws" }, head, pipe, h("div", { style: "overflow-x:auto" }, seg), body));
+      const chat = chatNode(mode === "ai"); if (window.DIR && DIR.createChat) { chat.classList.toggle("compact", mode !== "ai"); }
+      if (mode === "ai") { legacy.style.display = "none"; rootEl.replaceChildren(h("div", { class: "ws ws-ai" }, head, top, chat)); return; }
+      rootEl.replaceChildren(h("div", { class: "ws" }, head, pipe, top, dock(chat), h("div", { style: "overflow-x:auto" }, seg), body));
       if (reuse) { legacy.style.display = ""; return; }
       if (mode === "storyboard") storyboardMode(body); else if (mode === "director") directorMode(body); else legacyMode(body, mode);
     }
