@@ -186,7 +186,7 @@
       const bar = h("div", { class: "gl-bar", role: "tablist", "aria-label": "Filter scenes" }, F.map(([k, l]) => h("button", { type: "button", role: "tab", class: "ds-chip" + (k === cur ? " on" : ""), "aria-selected": k === cur, onclick: () => { ws.glFilter = k; draw(); } }, `${l} ${cnt(k)}`)));
       const shown = scenes.map((s, i) => [s, i]).filter(([s, i]) => pred(infos[i]));
       const grid = h("div", { class: "gl-grid", role: "list" }, shown.map(([s, i]) => cell(s, i, p, () => { if (s.start_asset_url) openViewer(s); else { ws.sceneId = s.id; go("scenes"); } })));
-      body.append(bar, shown.length ? grid : h("div", { class: "ds-empty" }, "No scenes in this filter."), h("div", { class: "ds-small", style: "text-align:center" }, "Tap a picture to see it full screen. Pinch or double-tap to zoom."));
+      body.append(window.BULK ? window.BULK.bar({ project: p, scenes, refresh: () => refresh(true), redraw: () => draw() }) : null, bar, shown.length ? grid : h("div", { class: "ds-empty" }, "No scenes in this filter."), h("div", { class: "ds-small", style: "text-align:center" }, "Tap a picture to see it full screen. Pinch or double-tap to zoom."));
     }
     function videosMode(body) {
       const { project: p, scenes } = ws; if (!scenes.length) return emptyScenes(body);
