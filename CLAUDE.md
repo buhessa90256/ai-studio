@@ -27,6 +27,8 @@ so keep explanations short and in plain language: what changed, how to see it, n
   The PC app (private repo `ai-studio-pc`, folder `ai-studio-web/`) has copies of the same screens: **change `studio/*.js` here first and copy them to the PC
   app** (the PC copies differ only by `document.getElementById("studio-main") || document.querySelector("main")`).
 
+- **Chat connector sync** (`studio/connector.js`): a link from the chat (`?connector=<address>/ro/<read-only token>`) is kept in localStorage; it copies characters, movies (as projects), frames, clips and final movies from the owner's connector into this device. Read-only; never put the address or token in the repo.
+
 ## Rules that matter
 - `workflows.js` mirrors `workflows.py` of the PC version (not in this repo). Keep node ids, inputs and model file names
   exactly as they are unless asked; a wrong model name fails on the GPU, not here.
