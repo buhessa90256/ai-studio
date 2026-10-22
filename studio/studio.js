@@ -272,6 +272,7 @@
         isDel ? act("Restore", "restore") : [act("Duplicate", "duplicate"), act("Save as new version", "new_version"), isArch ? act("Unarchive", "unarchive") : act("Archive", "archive"), act("Delete", "delete", "bad")]) : null,
       h("p", { class: "hint" }, "Changes save automatically. Scenes, storyboard and timeline will live in this project in the next phases."));
   }
+  Object.assign(window.SP, { openAsset, editCharacter, editProject, AS, TYPES });
 })();
 
 // ---------------------------------------------------------------------- character picker in generation forms
@@ -341,7 +342,6 @@
       return true;
     },
   };
-  Object.assign(window.SP, { openAsset, editCharacter, editProject, AS, TYPES });
 })();
 
 

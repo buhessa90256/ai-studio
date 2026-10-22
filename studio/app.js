@@ -101,9 +101,9 @@
     const rp = (health && health.runpod) || {}, w = rp.workers || {}, j = rp.jobs || {};
     const up = (w.idle || 0) + (w.ready || 0) + (w.running || 0);
     if ((health && health.error) || (!up && !(w.initializing) && ((w.unhealthy || 0) > 0 || (w.throttled || 0) > 0))) return { state: "unavailable", label: "GPU unavailable", detail: (health && health.error) || "RunPod has no healthy worker right now (throttled or unhealthy). Try again in a few minutes." };
-    if (w.running) return { state: "running", label: "GPU running", detail: `${w.running} worker${w.running === 1 ? "" : "s"} working${j.inQueue ? ", " + j.inQueue + " queued" : ""}` };
+    if (w.running) return { state: "running", label: "GPU running", detail: `${w.running} working · ${(w.idle || 0) + (w.ready || 0)} idle${j.inQueue ? " · " + j.inQueue + " queued" : ""}` };
     if (w.initializing) return { state: "initializing", label: "GPU starting", detail: "A worker is waking up (about 5 minutes). It costs money while it starts." };
-    if (up) return { state: "idle", label: "GPU idle", detail: "Awake and ready. Jobs start in seconds; it sleeps by itself after about 10 idle minutes." };
+    if (up) return { state: "idle", label: "GPU idle", detail: `${(w.idle || 0) + (w.ready || 0)} worker${(w.idle || 0) + (w.ready || 0) === 1 ? "" : "s"} ready. Jobs start in seconds; it sleeps by itself after about 10 idle minutes.` };
     return { state: "asleep", label: "GPU asleep", detail: "Costs nothing. The first job wakes it (about 5 minutes)." };
   };
   let gpuBusy = false;
@@ -126,6 +126,17 @@
   window.refreshGpu = () => APP.refreshGpu(true);   // the old header chip refresh now uses the same classification
   setInterval(() => { if (document.visibilityState === "visible") APP.refreshGpu(); }, 15000);
 
+  // a picture that fails to load shows a clear "could not load" tile (never an unrelated placeholder image) and can be retried by tapping it
+  document.addEventListener("error", e => {
+    const el = e.target; if (!el || el.tagName !== "IMG" || !el.closest(".ds-thumb, .rv-ver") || el.dataset.failed) return;
+    el.dataset.failed = "1"; const box = el.closest(".ds-thumb") || el.parentElement; el.style.display = "none";
+    if (!box.querySelector(".ds-broken")) { const b = h("div", { class: "ds-broken", title: "Tap to try again", onclick: ev => { ev.stopPropagation(); b.remove(); el.style.display = ""; delete el.dataset.failed; const u = el.src; el.src = ""; el.src = u; } }, icon("warn"), h("span", {}, "Could not load")); box.append(b); }
+  }, true);
+  APP.budgetNote = cost => {
+    const lim = Number(LS.get("limit_day", 0)) || 0; if (!lim) return "";
+    const today = new Date().toDateString(), spent = (gpu.recent || []).filter(j => new Date((j.finished || 0) * 1000).toDateString() === today).reduce((a, j) => a + (j.cost || 0), 0);
+    return spent + cost > lim ? " Heads up: this would pass your daily limit of " + APP.money(lim) + " (" + APP.money(spent) + " spent today on this device)." : "";
+  };
   // ------------------------------------------------------------------ selection (kept in sync with the old screens through the shared localStorage key)
   APP.syncNow = () => (window.__connectorSync ? window.__connectorSync() : Promise.resolve());
   APP.select = (pid, sceneId) => { APP.state.projectId = pid || ""; APP.state.sceneId = sceneId || ""; LS.set("sb_project", pid || ""); APP.emit("select", APP.state); };

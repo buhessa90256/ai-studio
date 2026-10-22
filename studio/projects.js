@@ -33,7 +33,7 @@
       const shown = projects.filter(p => !q || (p.name || "").toLowerCase().includes(q)).filter(p => listFilter === "all" || (listFilter === "active" ? !(scenesBy[p.id] || []).length || APP.pipeline(scenesBy[p.id]).vids < (scenesBy[p.id] || []).length : APP.pipeline(scenesBy[p.id] || []).vids === (scenesBy[p.id] || []).length && (scenesBy[p.id] || []).length));
       const search = h("input", { class: "ds-input", placeholder: "Search projects", value: listQ, "aria-label": "Search projects" }); search.oninput = () => { listQ = search.value; clearTimeout(list.t); list.t = setTimeout(() => list(++token), 250); };
       const seg = h("div", { class: "ds-seg" }, [["active", "In progress"], ["done", "Finished"], ["all", "All"]].map(([k, l]) => h("button", { type: "button", class: listFilter === k ? "on" : "", onclick: () => { listFilter = k; list(++token); } }, l)));
-      rootEl.replaceChildren(h("div", { class: "hm-hero" }, h("div", {}, h("h1", { class: "ds-h" }, "Projects"), h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`)), h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project")),
+      rootEl.replaceChildren(h("div", { class: "hm-hero" }, h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`), h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project")),
         h("div", { class: "ds-row ds-wrap", style: "margin:14px 0" }, h("div", { class: "ds-grow", style: "min-width:200px" }, search), seg),
         shown.length ? h("div", { class: "ds-grid wide" }, shown.map(p => APP.projectCard(p, scenesBy[p.id] || [], APP.pipeline(scenesBy[p.id] || []))))
           : h("div", { class: "ds-empty" }, icon("film"), h("b", {}, projects.length ? "No projects match" : "No projects yet"), projects.length ? "Try another filter or search." : "A project holds your scenes, start frames, videos and the final edit.", projects.length ? null : h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, "Create your first project")));
@@ -53,6 +53,7 @@
       draw(); startPoll();
       if (APP.state.review && ws.sceneId) { APP.state.review = false; const sc = scenes.find(s => s.id === ws.sceneId); if (sc) APP.openReview(sc, project, ctx()); }
     }
+    const pid_ = () => (ws && ws.pid) || "";
     const cur = () => (ws && ws.scenes.find(s => s.id === ws.sceneId)) || null;
     const ctx = () => ({ refresh, project: ws.project, scenes: ws.scenes, actions });
     async function refresh() { if (!ws) return; const [project, scenes] = await Promise.all([APP.project(ws.pid), APP.scenes(ws.pid, true)]); if (!ws || !project) return; ws.project = project; ws.scenes = scenes; if (!scenes.some(s => s.id === ws.sceneId)) ws.sceneId = (scenes[0] || {}).id || ""; draw(); }
@@ -70,8 +71,13 @@
         h("button", { class: "ds-btn icon sm", "aria-label": "Project menu", onclick: () => projectMenu() }, icon("dots")));
       const pipe = h("div", { class: "ws-pipe", "aria-label": "Production pipeline" }, pl.steps.map(s => h("span", { class: "ws-step" + (s.done ? " done" : s.cur ? " cur" : "") }, h("i"), s.name)));
       const seg = h("div", { class: "ds-seg", role: "tablist" }, MODES.map(([k, l]) => h("button", { type: "button", role: "tab", class: mode === k ? "on" : "", "aria-selected": mode === k, onclick: () => setMode(k) }, l)));
-      const body = h("div", { id: "ws-content" });
+      const legacyNow = mode === "editor" || mode === "automation", key = pid_() + ":" + mode;
+      if (!legacyNow && legacy.parentElement !== host) host.append(legacy);   // the old screens go back to their hidden home when not in use
+      const reuse = legacyNow && ws.legacyBody && ws.legacyKey === key;   // keep the mounted Editor / Workflows screen (and anything not saved yet) untouched by refreshes
+      const body = reuse ? ws.legacyBody : h("div", { id: "ws-content" });
+      ws.legacyBody = legacyNow ? body : null; ws.legacyKey = legacyNow ? key : "";
       rootEl.replaceChildren(h("div", { class: "ws" }, head, pipe, h("div", { style: "overflow-x:auto" }, seg), body));
+      if (reuse) { legacy.style.display = ""; return; }
       if (mode === "storyboard") storyboardMode(body); else if (mode === "director") directorMode(body); else legacyMode(body, mode);
     }
 
@@ -121,6 +127,18 @@
     }
 
     // ------------------------------------------------------------------ Storyboard mode
+    // desktop: drag the two splitters to resize the scene list and the properties panel (remembered)
+    function splitters(bodyEl) {
+      const set = (k, v) => { bodyEl.style.setProperty(k, v + "px"); APP.LS.set("ws" + k, String(v)); };
+      for (const k of ["--rail-w", "--panel-w"]) { const v = APP.LS.get("ws" + k, ""); if (v) bodyEl.style.setProperty(k, v + "px"); }
+      for (const which of ["rail", "panel"]) {
+        const el = h("div", { class: "ws-split " + which, role: "separator", "aria-orientation": "vertical", title: "Drag to resize" });
+        el.onpointerdown = e => { el.setPointerCapture(e.pointerId); el.classList.add("drag"); const r = bodyEl.getBoundingClientRect();
+          el.onpointermove = ev => { if (which === "rail") set("--rail-w", Math.round(Math.min(340, Math.max(120, ev.clientX - r.left)))); else set("--panel-w", Math.round(Math.min(600, Math.max(280, r.right - ev.clientX)))); };
+          el.onpointerup = () => { el.classList.remove("drag"); el.onpointermove = null; }; };
+        bodyEl.append(el);
+      }
+    }
     function storyboardMode(body) {
       const { project: p, scenes } = ws, sc = cur();
       if (!scenes.length) { body.append(h("div", { class: "ds-empty" }, icon("film"), h("b", {}, "No scenes yet"), "Plan the story first. Each scene becomes one start frame and one video.",
@@ -129,6 +147,7 @@
       body.append(h("div", { class: "ws-body" }, rail(), h("div", { class: "ws-stage" }, h("div", { class: "ds-row ds-between ds-wrap" }, h("div", {}, h("div", { class: "ds-h2" }, `Scene ${scenes.indexOf(sc) + 1}${sc.title && !/^scene \d+$/i.test(sc.title.trim()) ? " · " + sc.title : ""}`), h("div", { class: "ds-small" }, `${sc.duration || 6}s${sc.location ? " · " + sc.location : ""}`)), statusRow(sc, info)),
         stage(sc, info), sc.error ? h("div", { class: "ck" }, h("span", { class: "ds-pill bad" }, "Error"), h("div", {}, APP.txt(sc.error), h("span", {}, "Try again; if it keeps failing, check Settings → Diagnostics."))) : null, actionBar(sc, info)),
         propsPanel(sc, info)));
+      const wb = body.querySelector(".ws-body"); if (wb) splitters(wb);
     }
     function propsPanel(sc, info) {
       const p = ws.project, saved = h("span", { class: "ds-small" }); let timer;
@@ -185,14 +204,14 @@
       async frame(sc) {
         if (sc.settings && sc.settings.cm) return APP.chatAct("regenerate", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
-        if (!(await APP.confirm(info.hasFrame ? "Make a new start frame?" : "Make the start frame?", `Uses the GPU (about ${APP.money(APP.estimate(sc, "frame"))} of RunPod credit). The current frame stays in Frame versions.${APP.gpu.state === "asleep" ? "\nThe GPU is asleep and needs about 5 minutes to wake." : ""}`, "Generate"))) return;
+        if (!(await APP.confirm(info.hasFrame ? "Make a new start frame?" : "Make the start frame?", `Uses the GPU (about ${APP.money(APP.estimate(sc, "frame"))} of RunPod credit).${info.hasFrame ? " The current frame stays in Frame versions." : ""}${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "frame")) : ""}${APP.gpu.state === "asleep" ? "\nThe GPU is asleep and needs about 5 minutes to wake." : ""}`, "Generate"))) return;
         await APP.once("frame:" + sc.id, async () => { try { await window.SP.sb.use(ws.pid); await window.SP.sb.frame(sc.id); APP.toast("Start frame is being made. You can leave this page.", "ok"); } catch (e) { APP.fail(e, "Start frame"); } await refresh(); });
       },
       async video(sc) {
         if (sc.settings && sc.settings.cm) return APP.chatAct("approve", sc, ws.project);
         const info = APP.sceneInfo(sc, ws.project);
         if (!info.approved) return APP.toast("Approve the start frame first.");
-        if (!(await APP.confirm("Make the video?", `Uses the GPU for about 7 minutes (about ${APP.money(APP.estimate(sc, "clip"))} of RunPod credit). This only starts because you pressed Generate.`, "Generate video"))) return;
+        if (!(await APP.confirm("Make the video?", `Uses the GPU for about 7 minutes (about ${APP.money(APP.estimate(sc, "clip"))} of RunPod credit). This only starts because you pressed Generate.${APP.budgetNote ? APP.budgetNote(APP.estimate(sc, "clip")) : ""}`, "Generate video"))) return;
         await APP.once("video:" + sc.id, async () => { try { await window.SP.sb.use(ws.pid); await window.SP.sb.video(sc.id); APP.toast("Video is being made.", "ok"); } catch (e) { APP.fail(e, "Video"); } await refresh(); });
       },
       async approve(sc) {

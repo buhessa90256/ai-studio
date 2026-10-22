@@ -89,6 +89,14 @@
           if (kind !== "video") {  // check the shape of the new start frame; videos are always fed a correctly shaped copy (see makeVideo)
             try { const [pw, ph] = SIZE[S.project.aspect] || SIZE["16:9"], [iw, ih] = await imageSize(asset.url || ("/media/" + asset.id)); if (!sameShape(iw, ih, pw, ph)) note = `Note: this start frame is ${iw}x${ih} but the project is ${S.project.aspect}. It will be fitted without stretching (background extended) when the video is made.`; } catch {}
           }
+          if (kind !== "video" && window.APP && APP.collageScan) {   // automatic visual check (v2 interface): one continuous picture in the project's exact shape
+            const bad = await checkFrame(asset.url || ("/media/" + asset.id));
+            if (bad) {
+              const st0 = sc.settings || {}, tried = (st0.autotry || 0) + 1, attempts = [...(st0.frame_attempts || []), { n: tried, asset: asset.id, verdict: "reject", reasons: bad }].slice(-8);
+              if (tried < MAX_FRAME_TRIES) { sc = await patch(sc, { status: "keyframe_generating", error: "Frame rejected automatically (" + bad[0] + "). Trying again (" + (tried + 1) + "/" + MAX_FRAME_TRIES + ").", settings: { ...st0, frame_attempts: attempts, autotry: tried } }); S.tracking.delete(sc.id); await makeKeyframe(sc, tried); return; }
+              sc = await patch(sc, { status: "failed", error: "No valid start frame after " + MAX_FRAME_TRIES + " attempts (" + bad[0] + "). The generated pictures are kept in the Library; nothing was approved.", settings: { ...st0, frame_attempts: attempts, autotry: 0 } }); break;
+            }
+          }
           const hist = ((sc.settings || {}).frame_history || []).slice(-11);   // every start frame stays available (previous versions, compare, rollback)
           if (kind !== "video" && sc.start_asset && !hist.some(x => x.asset === sc.start_asset)) hist.push({ v: hist.length + 1, asset: sc.start_asset, at: Date.now() / 1000 });
           if (kind !== "video") hist.push({ v: hist.length + 1, asset: asset.id, at: Date.now() / 1000 });
@@ -99,19 +107,53 @@
       }
     } finally { S.tracking.delete(sc.id); draw(); }
   }
+  async function checkFrame(url) {   // [] -> fine; otherwise the reasons the frame cannot be used
+    const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
+    if (!img) return null;
+    const [pw, ph] = SIZE[S.project.aspect] || SIZE["16:9"], reasons = [];
+    if (!sameShape(img.naturalWidth, img.naturalHeight, pw, ph) && Math.abs(img.naturalWidth / img.naturalHeight - pw / ph) / (pw / ph) > 0.12) reasons.push(`wrong shape ${img.naturalWidth}x${img.naturalHeight}, ${S.project.aspect} is needed`);
+    const scan = APP.collageScan(img); if (scan && scan.panels > 1) reasons.push(`collage: ${scan.panels} panels / split screen`);
+    return reasons.length ? reasons : null;
+  }
   const patch = async (sc, ch) => { const n = await api("scenes", { ...sc, ...ch }); const i = S.scenes.findIndex(x => x.id === sc.id); if (i >= 0) S.scenes[i] = n; draw(); return n; };
   const generate = async body => (await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error || "Error " + r.status); return j; })).id;
 
-  async function makeKeyframe(sc) {
-    const [w, hh] = SIZE[S.project.aspect] || SIZE["16:9"];
+  // Start frame. Every character reference is its OWN picture (image 1, image 2 ...) and the prompt says what each is for and that the result is ONE frame:
+  // a combined board / sheet made the model copy its layout into a collage. Same method as the connector (framegen.py).
+  const FRAME_MANDATORY = (aspect) => "Generate exactly ONE continuous cinematic image showing ONE moment in ONE scene, from ONE camera viewpoint. This is a single frame for image-to-video generation, NOT a storyboard or character reference sheet. Use all provided character references strictly for identity and appearance. Do not reproduce the reference image layout. NO collage, NO split screen, NO panels, NO diptych, NO triptych, NO contact sheet, NO stacked images, NO borders, NO horizontal separators, NO repeated scene variations, NO multiple camera angles. The entire image must show one uninterrupted environment with consistent perspective, lighting, and composition. Each named character must appear exactly once unless explicitly requested otherwise. Output one complete cinematic frame in the project's exact " + aspect + " aspect ratio.";
+  const FRAME_STRICT = "IMPORTANT: an earlier attempt returned several panels or repeated people. Draw ONE full-bleed photograph with ONE room and ONE floor, filling the whole canvas edge to edge. Every character stands or sits in the SAME space, together, exactly once. Nothing in the picture is a smaller copy of another part of it.";
+  const FRAME_NEGATIVE = "collage, split screen, panels, diptych, triptych, contact sheet, stacked images, borders, frames, horizontal separators, vertical separators, repeated scene variations, multiple camera angles, character reference sheet, storyboard, text, labels, duplicate characters";
+  const MAX_FRAME_TRIES = 3;
+  async function refPicture(bmp, ratio, maxSide = 1024) {   // uniform scale only; the picture meant to set the output shape is cropped (never stretched) to that shape
+    let sx = 0, sy = 0, sw = bmp.width, sh = bmp.height;
+    if (ratio) { if (sw / sh < ratio) { sh = Math.round(sw / ratio); sy = Math.round((bmp.height - sh) * 0.15); } else { sw = Math.round(sh * ratio); sx = Math.round((bmp.width - sw) / 2); } }
+    const k = Math.min(1, maxSide / Math.max(sw, sh)), cv = document.createElement("canvas"); cv.width = Math.max(1, Math.round(sw * k)); cv.height = Math.max(1, Math.round(sh * k));
+    cv.getContext("2d").drawImage(bmp, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    return fileB64(await new Promise(r => cv.toBlob(r, "image/png")));
+  }
+  async function makeKeyframe(sc, attempt = 0) {
+    const [w, hh] = SIZE[S.project.aspect] || SIZE["16:9"], aspect = S.project.aspect;
     const p = await api(`scenes/${sc.id}/prompt`);
     if (!p.scene_text.trim()) throw new Error("Describe what happens in this scene first (Action).");
     let job;
-    if (sc.characters.length) {
-      const b = await api("board", { characters: sc.characters, width: w, height: hh });  // the board has the project's shape, so the start frame comes out in that shape
-      job = await generate({ tool: "qwen_edit", params: { image: b.image, prompt: b.prompt + " Create a new photorealistic " + S.project.aspect + " photo of these same characters: " + p.scene_text + " Sharp, high detail, no extra people." } });
-    } else job = await generate({ tool: "qwen_image", params: { prompt: p.scene_text + " Photorealistic, sharp, high detail.", width: w, height: hh, turbo: true } });
-    sc = await patch(sc, { status: "keyframe_generating", job_id: job, error: "" });
+    const strict = attempt >= 1 ? " " + FRAME_STRICT : "";
+    const chars = S.chars.filter(c => sc.characters.includes(c.id)).slice(0, 4);
+    if (chars.length) {
+      const items = [];
+      for (const c of chars) {
+        const r = (c.refs || []).find(x => x.role === "primary") || (c.refs || []).find(x => x.role === "face") || (c.refs || [])[0];
+        if (!r) throw new Error(`${c.name} has no reference photo yet. Add one in the Library.`);
+        items.push({ c, bmp: await createImageBitmap(await (await fetch(r.asset.url)).blob()) });
+      }
+      const target = w / hh; items.sort((a, b) => Math.abs(a.bmp.width / a.bmp.height - target) - Math.abs(b.bmp.width / b.bmp.height - target));
+      const images = []; for (let k = 0; k < items.length; k++) { const near = Math.abs(items[k].bmp.width / items[k].bmp.height - target) / target < 0.45; images.push(await refPicture(items[k].bmp, k === 0 && near ? target : 0)); }
+      const desc = c => [c.age, c.hair && (/hair/i.test(c.hair) ? c.hair : c.hair + " hair"), c.eyes && (/eye/i.test(c.eyes) ? c.eyes : c.eyes + " eyes")].filter(Boolean).join(", ");
+      const refs = items.map((x, k) => `image ${k + 1} is ${x.c.name}'s face and look${desc(x.c) ? " (" + desc(x.c) + ")" : ""}`).join("; ");
+      const names = items.map(x => x.c.name).join(", ");
+      const prompt = `Reference pictures, used only for identity and appearance and never for layout: ${refs}. Keep each character's exact face, proportions, hairstyle and outfit. Create a new photorealistic ${aspect} photograph. ${p.scene_text} The image contains exactly ${items.length} character${items.length > 1 ? "s" : ""}: ${names}, each shown once. ${FRAME_MANDATORY(aspect)}${strict}`;
+      job = await generate({ tool: "qwen_edit", params: { images, prompt, negative: FRAME_NEGATIVE, turbo: true } });
+    } else job = await generate({ tool: "qwen_image", params: { prompt: p.scene_text + " Photorealistic, sharp, high detail. " + FRAME_MANDATORY(aspect) + strict, negative: FRAME_NEGATIVE, width: w, height: hh, turbo: true } });
+    sc = await patch(sc, { status: "keyframe_generating", job_id: job, error: "", settings: { ...(sc.settings || {}), autotry: attempt } });
     return track(sc, "keyframe");
   }
   async function makeVideo(sc) {

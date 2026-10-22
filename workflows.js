@@ -97,19 +97,24 @@ function qwen_image(p) {
 }
 
 function qwen_edit(p) {
-  const [name, uploads] = upload(p);
+  // `image` = ONE reference picture (old way). `images` = a LIST of separate reference pictures (image 1, image 2, ...): each stays its own picture, so the model uses
+  // them for identity only and does not copy a combined sheet's layout (combined sheets made collages). Mirrors workflows.py.
+  let uploads = [], names = [];
+  if (Array.isArray(p.images) && p.images.length) {
+    for (const data of p.images.slice(0, 8)) { const [n, u] = upload({ image: data }); names.push(n); uploads = uploads.concat(u); }
+  } else { const [n, u] = upload(p); names = [n]; uploads = u; }
   const turbo = !!p.turbo;
   const wf = {
     "1": { class_type: "UNETLoader", inputs: { unet_name: QWEN_UNET, weight_dtype: "default" } },
     "3": { class_type: "CLIPLoader", inputs: { clip_name: QWEN_CLIP, type: "qwen_image", device: "default" } },
     "4": { class_type: "VAELoader", inputs: { vae_name: QWEN_VAE } },
-    "20": { class_type: "LoadImage", inputs: { image: name } },
     "5": { class_type: "TextEncodeQwenImage21", inputs: {
-      clip: ["3", 0], vae: ["4", 0], "images.image_1": ["20", 0],
-      prompt: p.prompt || "", negative_prompt: "", resolution: 1024 } },
+      clip: ["3", 0], vae: ["4", 0],
+      prompt: p.prompt || "", negative_prompt: p.negative || "", resolution: 1024 } },
     "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["4", 0] } },
     "9": { class_type: "SaveImage", inputs: { images: ["8", 0], filename_prefix: "qwen_edit" } },
   };
+  names.forEach((n, k) => { wf[String(20 + k)] = { class_type: "LoadImage", inputs: { image: n } }; wf["5"].inputs[`images.image_${k + 1}`] = [String(20 + k), 0]; });
   let model = ["1", 0];
   if (turbo) {
     wf["10"] = { class_type: "LoraLoaderModelOnly", inputs: { model, lora_name: QWEN_TURBO_LORA, strength_model: 1.0 } };

@@ -33,7 +33,7 @@
       if (view === "hub") APP.emit("view:hub"); if (view === "library") APP.emit("view:library"); if (view === "studio") APP.emit("view:studio"); if (view === "settings") APP.emit("view:settings");
     };
     window.AppShell.landing = () => (location.hash && location.hash.length > 2 ? "route" : "hub");
-    const back = document.getElementById("back"); back.onclick = () => { go("/home"); };
+    const back = document.getElementById("back"); back.onclick = () => { if (!document.getElementById("v-tool").hidden) window.show("home"); else go("/home"); };   // tool -> tool picker -> Home
 
     // --- routes: #/home  #/projects  #/projects/<id>[/<mode>[/<sceneId>]]  #/library[/<filter>]  #/settings[/<section>]
     function route() {

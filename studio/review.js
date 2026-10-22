@@ -30,7 +30,22 @@
       };
       let hs = seams(H, W, (i, j) => gray[i * W + j]), vs = seams(W, H, (i, j) => gray[j * W + i]);
       if (hs.length + vs.length === 1) { const p = (hs[0] ?? vs[0]); if (![0.25, 1 / 3, 0.5, 2 / 3, 0.75].some(f => Math.abs(p - f) <= 0.04)) { hs = []; vs = []; } }
-      return { horizontal: hs, vertical: vs, panels: (hs.length + 1) * (vs.length + 1) };
+      let panels = (hs.length + 1) * (vs.length + 1), repeat = null;
+      {   // the same picture repeated in equal parts (halves, thirds, quarters): neighbouring parts have almost the same edge structure
+        const E = new Float32Array(W * H);
+        for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = y * W + x, gx = (gray[i - W + 1] + 2 * gray[i + 1] + gray[i + W + 1]) - (gray[i - W - 1] + 2 * gray[i - 1] + gray[i + W - 1]), gy = (gray[i + W - 1] + 2 * gray[i + W] + gray[i + W + 1]) - (gray[i - W - 1] + 2 * gray[i - W] + gray[i - W + 1]); E[i] = Math.hypot(gx, gy); }
+        const pool = (x0, y0, x1, y1) => { const out = new Float32Array(48 * 48); for (let j = 0; j < 48; j++) for (let i = 0; i < 48; i++) { const ya = y0 + Math.floor((y1 - y0) * j / 48), yb = Math.max(ya + 1, y0 + Math.floor((y1 - y0) * (j + 1) / 48)), xa = x0 + Math.floor((x1 - x0) * i / 48), xb = Math.max(xa + 1, x0 + Math.floor((x1 - x0) * (i + 1) / 48)); let sum = 0, k = 0; for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) { sum += E[y * W + x]; k++; } out[j * 48 + i] = k ? sum / k : 0; } return out; };
+        const stats = a => { let m = 0; for (const v of a) m += v; m /= a.length; let sd = 0; for (const v of a) sd += (v - m) * (v - m); return [m, Math.sqrt(sd / a.length)]; };
+        const corr = (a, b) => { const [ma, sa] = stats(a), [mb, sb] = stats(b); let c = 0; for (let i = 0; i < a.length; i++) c += (a[i] - ma) * (b[i] - mb); return c / a.length / (sa * sb || 1); };
+        outer: for (const axis of [0, 1]) for (const n of [3, 2, 4]) {
+          const segs = []; for (let i = 0; i < n; i++) segs.push(axis === 0 ? pool(0, Math.floor(H * i / n), W, Math.floor(H * (i + 1) / n)) : pool(Math.floor(W * i / n), 0, Math.floor(W * (i + 1) / n), H));
+          const st = segs.map(stats); if (st.some(([m, sd]) => m < 6 || sd < 3)) continue;
+          const cs = []; for (let i = 0; i < n - 1; i++) cs.push(corr(segs[i], segs[i + 1]));
+          if (Math.min(...cs) > 0.9) { repeat = { axis: axis === 0 ? "horizontal" : "vertical", n, corr: Math.min(...cs) }; break outer; }
+        }
+      }
+      if (repeat) panels = Math.max(panels, repeat.n);
+      return { horizontal: hs, vertical: vs, panels, repeat };
     };
     const loadImg = url => new Promise(res => { const i = new Image(); i.crossOrigin = "anonymous"; i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
 
@@ -71,7 +86,7 @@
           const want = project.aspect.split(":").map(Number), ratio = want[0] / want[1], got = im.naturalWidth / im.naturalHeight, ok = Math.abs(got - ratio) / ratio < 0.02;
           rows.push(row(ok ? "ok" : "bad", ok ? "Shape" : "Wrong shape", `${im.naturalWidth}×${im.naturalHeight} · project is ${project.aspect}`, ok ? "Exactly the project's aspect ratio." : "This frame is not " + project.aspect + ". It will be fitted without stretching when the video is made."));
           const sc2 = APP.collageScan(im);
-          if (sc2) rows.push(sc2.panels > 1 ? row("bad", "Collage?", `Looks like ${sc2.panels} panels / split screen`, "Seams found at " + [...sc2.horizontal.map(p => Math.round(p * 100) + "% down"), ...sc2.vertical.map(p => Math.round(p * 100) + "% across")].join(", ") + ". Reject and regenerate.") : row("ok", "One image", "No panel seams or split screen found", "Automatic check on this picture."));
+          if (sc2) rows.push(sc2.panels > 1 ? row("bad", "Collage?", `Looks like ${sc2.panels} panels / split screen`, (sc2.horizontal.length + sc2.vertical.length ? "Seams found at " + [...sc2.horizontal.map(p => Math.round(p * 100) + "% down"), ...sc2.vertical.map(p => Math.round(p * 100) + "% across")].join(", ") + ". " : "") + (sc2.repeat ? `The same picture seems to be repeated ${sc2.repeat.n} times. ` : "") + "Reject and regenerate.") : row("ok", "One image", "No panel seams or split screen found", "Automatic check on this picture."));
         }
         if (st.cidentity) { for (const [n, c] of Object.entries(st.cidentity.chars || {})) rows.push(row({ match: "ok", uncertain: "warn" }[c.verdict] || "bad", n, c.score != null ? "Face match " + Number(c.score).toFixed(2) : APP.txt(c.verdict, "not found"), ({ match: "Same person as the references.", uncertain: "Uncertain: please look closely." }[c.verdict]) || "Does not clearly match the references.")); }
         else rows.push(row("", "Identity", "Not checked on this device", "Face checks run on the connector (chat) or the PC app. Compare with the character references below."));
