@@ -38,7 +38,7 @@
 .im-sc{padding:10px 0;border-top:1px solid rgba(127,127,127,.2)}.im-sc .ds-row{align-items:center}
 .im-sc img{width:52px;height:72px;object-fit:cover;border-radius:8px;flex:none;background:#0006}.im-sc .ph{width:52px;height:72px;border-radius:8px;border:1px dashed rgba(127,127,127,.5);display:flex;align-items:center;justify-content:center;flex:none;font-size:11px;opacity:.7;text-align:center}
 .im-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}.im-btns button{min-height:44px}
-.im-sel{font:inherit;color:inherit;background:transparent;border:1px solid rgba(127,127,127,.4);border-radius:8px;padding:8px;min-height:44px;max-width:100%}`;
+.im-hid{border:1px solid #e0a84a;border-radius:14px;padding:12px;margin:0 0 12px;background:rgba(224,168,74,.1)}.im-sel{font:inherit;color:inherit;background:transparent;border:1px solid rgba(127,127,127,.4);border-radius:8px;padding:8px;min-height:44px;max-width:100%}`;
     let styled = false; const style = () => { if (!styled) { styled = true; document.head.append(h("style", {}, css)); } };
 
     // ------------------------------------------------------------------ checks (before anything is sent)
@@ -273,7 +273,7 @@
           h("div", { class: "ds-row ds-wrap", style: "gap:6px" }, h("b", {}, "Scene " + num), h("span", { class: "ds-pill " + (!info.hasFrame && md === "chatgpt" ? "warn" : info.tone) }, info.key === "await_import" || (!info.hasFrame && !info.busy && md === "chatgpt") ? "Needs picture" : info.label), src ? h("span", { class: "ds-pill" }, SRC_LABEL[src] || src) : null),
           nm.length ? h("div", { class: "im-mut" }, nm.join(", ")) : null,
           h("div", { class: "im-mut" }, `Video: ${info.hasVideo ? (clipOld ? "ready, outdated" : "ready") : info.busy && info.key === "video_run" ? "making…" : "not made"} · Frame ${frameCost} · Video ≈ ${info.hasVideo ? "$0.00" : APP.money(APP.estimate(s, "clip"))}`),
-          h("div", { class: "im-btns" }, h("button", { class: "ds-btn sm", onclick: () => sheet(p, s, { refresh: ctx.refresh, number: num, scenes }) }, icon("img"), info.hasFrame ? "Replace frame" : "Import frame"),
+          h("div", { class: "im-btns" }, h("button", { class: "ds-btn sm", onclick: () => scene(p, s, { actions: act, chars, refresh: ctx.refresh, scenes }) }, "Details"), h("button", { class: "ds-btn sm", onclick: () => sheet(p, s, { refresh: ctx.refresh, number: num, scenes }) }, icon("img"), info.hasFrame ? "Replace frame" : "Import frame"),
             (stOf(s).frame_history || stOf(s).cversions || []).length > 1 ? h("button", { class: "ds-btn sm ghost", onclick: () => versions(p, s, { refresh: ctx.refresh, number: num }) }, "Versions") : null,
             info.hasFrame && info.approved && act.video && !info.busy ? h("button", { class: "ds-btn sm", onclick: () => act.video(s) }, icon("play"), info.hasVideo ? "Regenerate video" : "Make video") : null))));
       });
@@ -300,6 +300,102 @@
     }
     const g = setInterval(() => { if (guard()) clearInterval(g); }, 300); setTimeout(() => clearInterval(g), 60000);
 
-    window.IMP = { sheet, bulk, versions, card, gpuFramesBlocked, mode, SOURCES, _t: { inspect, importOne, guessScene, sniff, mode, srcOf, isImported, steps, restoreOne } };
+    // ------------------------------------------------------------------ Scene details: everything about ONE scene in one place (frame, cast, approval, video, errors)
+    const STEPS6 = ["Request accepted", "Queued", "Worker assigned", "Generating", "Validating", "Ready for review"];
+    async function post(op, st, extra) {
+      const act = actLink(); if (!act) throw new Error("This is a chat movie: ask your chat to open the studio app with actions allowed, then open that link on this device.");
+      let r, j;
+      try { r = await fetch(`${act}/${op}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ movie_id: st.cm, scene_number: st.cn, ...extra }), cache: "no-store", credentials: "omit" }); j = await r.json().catch(() => ({})); }
+      catch (e) { throw new Error("Could not reach the connector. Nothing was changed or charged. " + (e && e.message || "")); }
+      if (r.status === 404) throw new Error("The actions link is no longer valid. Ask your chat for a new one (say “open in studio app”, actions allowed).");
+      return j;
+    }
+    function scene(project, sc0, ctx = {}) {
+      style();
+      let sc = sc0, err = "", note = "", busy = false, off = [], box = null, closeSheet = null;
+      const st = () => stOf(sc), chat = () => isChat(sc), cid = () => (project.data || {}).connector_id || st().cm;
+      const num = () => chat() ? st().cn : ((ctx.scenes || []).findIndex(x => x.id === sc.id) + 1 || "");
+      const fail = e => { err = String(e && e.message || e); note = ""; render(); };
+      const refresh = async () => { try { const all = await APP.scenes(project.id, true); sc = all.find(x => x.id === sc.id) || sc; } catch {} if (box) render(); };
+      async function chatVideo() {
+        if (busy) return; const s = st(), sha = (s.cmeta || {}).sha256 || "", cast = names(sc, ctx.chars);
+        const extra = { approve_frame: true, expected_sha256: sha, expected_characters: cast };
+        busy = true; err = ""; note = "Checking the scene…"; render();
+        try {
+          const pre = await post("video_preview", s, extra);
+          if (pre.status !== "needs_confirmation") { err = txt(pre.message || pre.error, "The connector did not accept the request."); note = ""; busy = false; render(); return; }
+          busy = false; note = ""; render();
+          const ok = await APP.confirm(`Make scene ${num()}'s video?`, `One paid video job for this scene only (about ${APP.money(pre.estimated_cost_usd)} of RunPod credit). The frame you see is approved now and is the exact start of the video. No other scene, no new start frame, no assembly.${APP.gpu && APP.gpu.state === "asleep" ? "\nThe GPU is asleep: the first video can take about 20 minutes." : ""}`, "Approve & generate");
+          if (!ok) return;
+          busy = true; note = "Sending the request…"; render();
+          const res = await post("generate_video", s, { ...extra, confirm: true, resume_if_paused: true, idempotency_key: `app-${String(s.cm).slice(-5)}-s${s.cn}-${Date.now().toString(36)}`, wait_seconds: 10 });
+          if (res.status === "submitted" || res.status === "queued") note = txt(res.message, "Started."); else { err = txt(res.message || res.error, "The connector did not start the video."); note = ""; }
+          if (APP.live && APP.live.refresh) APP.live.refresh();
+        } catch (e) { err = String(e && e.message || e); note = ""; }
+        busy = false; render();
+      }
+      async function approveLocal() {
+        try { await APP.saveScene(sc, { settings: { ...st(), review: "approved" } }); note = "Frame approved."; err = ""; await refresh(); } catch (e) { fail(e); }
+      }
+      function render() {
+        if (!box) return;
+        const info = APP.sceneInfo(sc, project), L = (APP.live && APP.live.get(cid())) || null, row = L && (L.scenes || []).find(x => x.scene === st().cn), lc = row && row.lifecycle;
+        const cast = names(sc, ctx.chars), src = srcOf(sc), meta = st().cmeta || st().frame_meta || {}, hasVid = info.hasVideo, failed = info.key === "failed" || (row && row.state === "needs_fix");
+        const blocks = [];
+        blocks.push(h("div", { class: "ds-row ds-between", style: "align-items:flex-start" }, h("div", { class: "im-grow" }, h("h2", { class: "ds-h2", style: "font-size:18px;margin:0" }, `Scene ${num()}`), h("div", { class: "ds-sub", style: "margin:2px 0 0" }, /^scene \d+$/i.test(txt(sc.title, "").trim()) ? "" : txt(sc.title, ""))),
+          h("button", { class: "ds-btn icon ghost", "aria-label": "Close", onclick: () => closeSheet && closeSheet() }, icon("x"))));
+        blocks.push(h("div", { class: "ds-row ds-wrap", style: "gap:6px;margin:6px 0" }, h("span", { class: "ds-pill " + info.tone }, info.key === "await_import" ? "Waiting for your picture" : info.label), src ? h("span", { class: "ds-pill" }, SRC_LABEL[src] || src) : null,
+          stOf(sc).clip_stale ? h("span", { class: "ds-pill warn" }, "video is from an older frame") : null));
+        blocks.push(h("p", { class: "ds-sub", style: "margin:0 0 8px" }, txt(sc.action, "").slice(0, 300)));
+        blocks.push(h("div", { class: "ds-field" }, h("label", {}, "Characters in this scene"), cast.length ? h("div", { class: "ds-chips", style: "flex-wrap:wrap" }, cast.map(n => h("span", { class: "ds-chip on" }, n))) : h("div", { class: "im-mut" }, "No characters assigned.")));
+        blocks.push(info.hasFrame ? h("div", { class: "im-prev", style: "margin:8px 0" }, h("img", { src: sc.start_asset_url, alt: `Scene ${num()} start frame`, style: "width:140px;max-height:250px", onclick: () => APP.viewer && APP.viewer([{ url: sc.start_asset_url, title: `Scene ${num()}`, id: sc.id }], 0, {}) }),
+          h("div", { class: "im-grow im-mut" }, h("div", {}, `Start frame · ${SRC_LABEL[src] || "AI Studio GPU"}${meta.version ? " · version " + meta.version : ""}`), meta.width ? h("div", {}, `${meta.width}×${meta.height}${meta.format ? " " + String(meta.format).toUpperCase() : ""}`) : null,
+            meta.sha256 ? h("div", { style: "overflow-wrap:anywhere" }, "SHA-256 " + String(meta.sha256).slice(0, 16) + "…") : null,
+            st().cwarn ? h("div", { class: "im-warn" }, "⚠ " + st().cwarn) : null, ...(st().cflags || []).slice(0, 3).map(f => h("div", { class: "im-warn" }, "⚠ " + f)),
+            st().cidentity ? h("div", {}, "Face check: " + st().cidentity.overall) : h("div", {}, chat() ? "" : "Face check: not available on this device")))
+          : h("div", { class: "ds-empty", style: "margin:8px 0" }, icon("img"), "No start frame yet. Import the approved picture."));
+        const btns = [h("button", { class: "ds-btn", onclick: () => sheet(project, sc, { refresh, number: num(), scenes: ctx.scenes }) }, icon("img"), info.hasFrame ? "Replace image" : "Import image")];
+        if ((st().frame_history || st().cversions || []).length > 1) btns.push(h("button", { class: "ds-btn ghost", onclick: () => versions(project, sc, { refresh, number: num() }) }, "Versions"));
+        blocks.push(h("div", { class: "ds-row ds-wrap", style: "gap:8px" }, btns));
+        // approval + video
+        const vb = [];
+        if (chat()) {
+          if (info.hasFrame && !hasVid && !info.busy) vb.push(h("button", { class: "ds-btn pri", disabled: busy, onclick: () => APP.once("scene-video:" + sc.id, chatVideo) }, icon("play"), failed ? "Retry failed video" : info.approved ? "Generate video" : "Approve frame & generate video"));
+          if (hasVid) vb.push(h("button", { class: "ds-btn", disabled: busy, onclick: () => APP.once("scene-video:" + sc.id, chatVideo) }, icon("refresh"), "Regenerate video"));
+        } else {
+          if (info.hasFrame && !info.approved && !hasVid) vb.push(h("button", { class: "ds-btn pri", onclick: approveLocal }, icon("check"), "Approve frame"));
+          if (info.hasFrame && info.approved && !info.busy && ctx.actions && ctx.actions.video) vb.push(h("button", { class: "ds-btn pri", onclick: async () => { try { await ctx.actions.video(sc); await refresh(); } catch (e) { fail(e); } } }, icon("play"), failed ? "Retry failed video" : hasVid ? "Regenerate video" : "Generate video"));
+        }
+        blocks.push(h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-top:8px" }, vb, info.hasFrame && !info.approved && chat() ? h("span", { class: "im-mut" }, "Approving also starts this scene's video (only this scene).") : null));
+        // progress
+        if (lc || info.busy) {
+          const step = lc ? lc.step : 0;
+          blocks.push(h("div", { class: "lv", style: "margin-top:10px" }, h("b", {}, "Progress: " + (lc ? lc.label : info.label)), h("div", { class: "lv-steps" }, STEPS6.map((s, i) => h("i", { class: i < step ? "on" : i === step - 1 ? "on now" : "", title: s }))),
+            row && row.gpu ? h("div", { class: "lv-mut", style: "font-size:13px" }, `${row.gpu.node || row.gpu.phase || ""} ${row.gpu.nodes || ""} · running ${Math.round((row.gpu.elapsed_seconds || 0) / 60)} min`) : null,
+            row && row.next_action ? h("div", { class: "lv-mut", style: "font-size:13px" }, row.next_action) : null));
+        }
+        if (row && (row.needs_fix || row.error)) blocks.push(h("div", { class: "im-bad", style: "margin-top:8px" }, "✕ " + txt((row.needs_fix && row.needs_fix.reason) || row.error, "This scene needs a fix.")));
+        if (hasVid) blocks.push(h("div", { style: "margin-top:10px" }, h("video", { src: sc.video_asset_url, controls: true, playsinline: true, preload: "metadata", style: "width:100%;max-height:340px;border-radius:10px;background:#000" }),
+          h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-top:6px" }, h("a", { class: "ds-btn", href: sc.video_asset_url, download: `scene-${num()}.mp4` }, icon("down"), "Download clip"))));
+        if (note) blocks.push(h("div", { class: "im-ok", style: "margin-top:8px" }, note));
+        if (err) blocks.push(h("div", { class: "im-bad", style: "margin-top:8px", role: "alert" }, "✕ " + err));
+        box.replaceChildren(...blocks);
+      }
+      APP.sheet((b, close) => { box = b; closeSheet = close; render(); }, { onClose: () => { off.forEach(f => { try { f(); } catch {} }); box = null; } });
+      off.push(APP.on("live", () => { if (box) refresh(); }), APP.on("changed", () => { if (box) refresh(); }));
+      refresh();
+    }
+
+    // ------------------------------------------------------------------ chat movies that were deleted on this phone but still exist in the studio
+    function hiddenBanner() {
+      const list = APP.hiddenChat || []; if (!list.length) return null; style();
+      const go = async ids => { try { await window.__connectorRestore(ids); APP.toast(ids.length > 1 ? "Chat movies restored." : "Movie restored.", "ok"); } catch (e) { APP.fail(e, "Restore"); } };
+      return h("div", { class: "im-hid", role: "status" }, h("b", {}, `${list.length} chat movie${list.length === 1 ? " is" : "s are"} hidden on this phone`),
+        h("div", { class: "im-mut" }, "They were deleted here earlier. They still exist in your studio and nothing was lost; restoring brings the project back with its frames and videos."),
+        h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-top:8px" }, list.slice(0, 3).map(m => h("button", { class: "ds-btn sm", onclick: () => go([m.id]) }, "Restore “" + String(m.title).slice(0, 32) + "”")), list.length > 1 ? h("button", { class: "ds-btn sm pri", onclick: () => go(list.map(m => m.id)) }, "Restore all " + list.length) : null));
+    }
+    APP.on("hidden-chat", () => { try { if (/^#\/projects\/?$/.test(location.hash) || location.hash === "" || /^#\/home/.test(location.hash)) APP.changed("projects"); } catch {} });
+
+    window.IMP = { sheet, bulk, versions, card, scene, hiddenBanner, gpuFramesBlocked, mode, SOURCES, _t: { inspect, importOne, guessScene, sniff, mode, srcOf, isImported, steps, restoreOne } };
   }
 })();

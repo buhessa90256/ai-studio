@@ -42,10 +42,11 @@
       await Promise.all(projects.slice(0, 40).map(async p => { scenesBy[p.id] = await APP.scenes(p.id); }));
       if (my !== token) return;
       const q = listQ.trim().toLowerCase();
+      const hb = window.IMP && IMP.hiddenBanner ? IMP.hiddenBanner() : null;
       const shown = projects.filter(p => !q || (p.name || "").toLowerCase().includes(q)).filter(p => listFilter === "all" || (listFilter === "active" ? !(scenesBy[p.id] || []).length || APP.pipeline(scenesBy[p.id]).vids < (scenesBy[p.id] || []).length : APP.pipeline(scenesBy[p.id] || []).vids === (scenesBy[p.id] || []).length && (scenesBy[p.id] || []).length));
       const search = h("input", { class: "ds-input", placeholder: "Search projects", value: listQ, "aria-label": "Search projects" }); search.oninput = () => { listQ = search.value; clearTimeout(list.t); list.t = setTimeout(() => list(++token), 250); };
       const seg = h("div", { class: "ds-seg" }, [["active", "In progress"], ["done", "Finished"], ["all", "All"]].map(([k, l]) => h("button", { type: "button", class: listFilter === k ? "on" : "", onclick: () => { listFilter = k; list(++token); } }, l)));
-      rootEl.replaceChildren(h("div", { class: "hm-hero" }, h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`), h("div", { class: "ds-row ds-wrap", style: "min-width:0" }, h("button", { class: "ds-btn", onclick: deletedSheet }, "Recently deleted"), projects.length && window.BULK ? h("button", { class: "ds-btn bad", id: "bk-del-open", onclick: () => window.BULK.deleteProjects({ onDone: () => list(++token) }) }, "Delete projects…") : null, h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project"))),
+      rootEl.replaceChildren(...(hb ? [hb] : []), h("div", { class: "hm-hero" }, h("div", { class: "ds-sub" }, `${projects.length} project${projects.length === 1 ? "" : "s"}`), h("div", { class: "ds-row ds-wrap", style: "min-width:0" }, h("button", { class: "ds-btn", onclick: deletedSheet }, "Recently deleted"), projects.length && window.BULK ? h("button", { class: "ds-btn bad", id: "bk-del-open", onclick: () => window.BULK.deleteProjects({ onDone: () => list(++token) }) }, "Delete projects…") : null, h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, icon("plus"), "New project"))),
         h("div", { class: "ds-row ds-wrap", style: "margin:14px 0" }, h("div", { class: "ds-grow", style: "min-width:200px" }, search), seg),
         shown.length ? h("div", { class: "ds-grid wide" }, shown.map(p => APP.projectCard(p, scenesBy[p.id] || [], APP.pipeline(scenesBy[p.id] || []))))
           : h("div", { class: "ds-empty" }, icon("film"), h("b", {}, projects.length ? "No projects match" : "No projects yet"), projects.length ? "Try another filter or search." : "A project holds your scenes, start frames, videos and the final edit.", projects.length ? null : h("button", { class: "ds-btn pri", onclick: () => APP.newProject() }, "Create your first project")));
@@ -348,6 +349,7 @@
         APP.toast("Making the start frame. You can leave this page; it keeps going.", "ok");
       },
       async import(sc) { if (window.IMP) IMP.sheet(ws.project, sc, { refresh: () => refresh(true), scenes: ws.scenes }); },
+      async details(sc) { if (window.IMP) IMP.scene(ws.project, sc, { actions, chars: ws.chars, refresh: () => refresh(true), scenes: ws.scenes }); },
       async importMany() { if (window.IMP) IMP.bulk(ws.project, ws.scenes, { refresh: () => refresh(true) }); },
       async video(sc) {
         if (viaChat(sc)) return APP.chatAct("approve", sc, ws.project);

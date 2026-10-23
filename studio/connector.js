@@ -37,13 +37,15 @@
     const ago = t => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago"; };
 
     const base = () => store.get(KEY);
-    const getJ = async p => { const r = await fetch(base() + p + (p.includes("?") ? "&" : "?") + "_=" + Date.now(), { cache: "no-store", credentials: "omit" }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "connector answered " + r.status); return j; };
+    const getJ = async p => { const r = await fetch(base() + p + (p.includes("?") ? "&" : "?") + "_=" + Date.now(), { cache: "no-store", credentials: "omit" }); const j = await r.json().catch(() => ({})); if (r.status === 404 || r.status === 401) throw new Error("This link is no longer valid (the connector's secret was changed). Say “open in studio app” in your chat and open the new link on this phone."); if (!r.ok) throw new Error(j.error || "connector answered " + r.status); return j; };
     const download = async u => { const r = await fetch(u); if (!r.ok) throw new Error("download " + r.status); return r.blob(); };
     const addAsset = async (name, blob, type, tags) => api("assets", { filename: name, data: await fileB64(blob), type, tags });
     const slug = s => String(s || "x").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "x";
     const ROLE = { face: "face", full_body_front: "body", full_body_side: "body", full_body_back: "body", three_quarter: "profile", turnaround: "body", expression_sheet: "expression", outfit: "costume", action_pose: "pose" };
     let doneRefs; try { doneRefs = new Set(JSON.parse(store.get(DONE_REFS) || "[]")); } catch { doneRefs = new Set(); }
     let changed = 0;
+    const HIDDEN = {};   // chat movies whose project was deleted on THIS phone: they are never recreated behind the user's back, but the app now says so and offers a restore
+    const publishHidden = () => { const was = JSON.stringify((window.APP && APP.hiddenChat) || []), now = Object.values(HIDDEN); if (window.APP) { APP.hiddenChat = now; if (was !== JSON.stringify(now) && APP.emit) APP.emit("hidden-chat", now); } };
 
     async function syncCharacters() {
       const { characters } = await getJ("/characters");
@@ -83,8 +85,10 @@
       if (d.error || !d.scenes) return;
       const aspect = d.aspect || "16:9";
       const projects = (await api("projects")).items;
-      if (((await api("projects?deleted=1")).items || []).some(x => x.data && x.data.connector_id === d.movie_id)) return;   // deleted by the user: stays deleted
       let p = projects.find(x => x.data && x.data.connector_id === d.movie_id);
+      const gone = p ? null : ((await api("projects?deleted=1")).items || []).find(x => x.data && x.data.connector_id === d.movie_id);
+      if (gone) { HIDDEN[d.movie_id] = { id: d.movie_id, title: d.title, localId: gone.id, status: d.status }; return; }   // deleted by the user: stays deleted until they restore it
+      delete HIDDEN[d.movie_id];
       const data = { ...(p ? p.data : {}), connector_id: d.movie_id, connector_status: d.status, connector_step: d.current_step || "", connector_import_mode: d.import_mode || "" };
       if (!p) { p = await api("projects", { name: "Chat: " + d.title, aspect, resolution: aspect === "9:16" ? "768x1344" : aspect === "1:1" ? "1024x1024" : "1344x768", description: "Made in the chat connector", data, folder: "From chat" }); changed++; }
       else if (p.data.connector_status !== d.status || p.data.connector_step !== data.connector_step || (p.data.connector_import_mode || "") !== data.connector_import_mode) { await api("projects", { id: p.id, name: p.name, aspect: p.aspect, data }); changed++; }
@@ -134,15 +138,22 @@
       try {
         await syncCharacters();
         const localChars = (await api("characters")).items;
-        const { movies } = await getJ("/movies?limit=12");
+        const all = (await getJ("/movies?limit=40")).movies || [];
+        const movies = all.filter((m, i) => i < 12 || !["cancelled", "failed", "done"].includes(m.status));   // the 12 newest, plus anything older that is still alive (paused / waiting / running)
         for (const m of movies || []) { if (m.scenes) { draw("Syncing “" + m.title + "”…"); await syncMovie(m, localChars); } }
-        last = Date.now(); store.set("connector_last", String(last)); draw(changed ? `Synced: ${changed} change${changed === 1 ? "" : "s"} from your chat.` : null);
+        publishHidden(); last = Date.now(); store.set("connector_last", String(last)); draw(changed ? `Synced: ${changed} change${changed === 1 ? "" : "s"} from your chat.` : null);
         if (changed) { const t = store.get("tab") || "dashboard"; try { window.showTab(t); } catch {} }
       } catch (e) { draw("Could not reach your connector: " + String(e.message || e).slice(0, 120)); }
       finally { busy = false; syncBtn.disabled = false; }
     }
     draw();
     window.__connectorSync = () => run(true);
+    window.__connectorRestore = async ids => {   // bring chat movies back that were deleted on this phone (soft delete: nothing was ever lost)
+      for (const id of ids || []) { const m = HIDDEN[id]; if (m) { await api("projects/" + m.localId + "/restore", {}); delete HIDDEN[id]; } }
+      publishHidden();
+      for (let i = 0; i < 60 && busy; i++) await new Promise(r => setTimeout(r, 250));   // a sync that is already running must finish first, otherwise the restored movie would wait for the next one
+      await run(true); if (window.APP) APP.changed("all");
+    };
     let one = false;   // live update of ONE chat movie (called every few seconds while its project is open)
     window.__connectorSyncMovie = async id => { if (one || busy || !base()) return false; one = true; try { const n0 = changed; changed = 0; await syncMovie({ id }, (await api("characters")).items); const c = changed; changed = n0; if (c && window.APP) APP.changed("scenes"); return true; } catch (e) { console.warn(e); return false; } finally { one = false; } };
     if (base()) setTimeout(() => run(false), 1500);
