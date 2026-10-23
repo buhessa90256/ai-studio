@@ -119,7 +119,7 @@
     try {
       const [health, bal, q] = await Promise.all([api("../health").catch(e => ({ error: String(e.message || e) })), api("../balance").catch(() => ({})), api("../queue").catch(() => ({ running: [], recent: [] }))]);
       const c = APP.gpuClassify(health, q), rp = (health.runpod || {});
-      Object.assign(gpu, c, { workers: rp.workers || {}, jobs: rp.jobs || {}, running: q.running || [], recent: q.recent || [], balance: bal.balance ?? null, perHour: bal.per_hour ?? (c.state === "asleep" ? 0 : 1.22), spent: q.cost_recent ?? null, error: health.error || "", at: Date.now() });
+      Object.assign(gpu, c, { workers: rp.workers || {}, jobs: rp.jobs || {}, running: q.running || [], recent: q.recent || [], balance: bal.balance ?? null, perHour: bal.per_hour ?? (c.state === "asleep" ? 0 : 1.75), spent: q.cost_recent ?? null, error: health.error || "", at: Date.now() });
     } finally { gpuBusy = false; }
     APP.emit("gpu", gpu); paintHeader(); return gpu;
   };

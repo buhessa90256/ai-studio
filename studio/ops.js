@@ -42,7 +42,7 @@
         stat("Jobs", `${q.running.length} running`, `${jobs.inQueue || 0} queued · ${jobs.failed || 0} failed overall`),
         stat("Recent GPU spend", "$" + (q.cost_recent || 0).toFixed(2), "last " + q.recent.length + " jobs"),
         stat(window.StudioBackend ? "Storage on this device" : "Storage on this PC", ((storage.data_mb || 0) + (storage.outputs_mb || 0)) + " MB", window.StudioBackend ? `used ${storage.data_mb || 0} MB of ${storage.quota_mb || "?"} MB` : `library ${storage.data_mb || 0} MB · results ${storage.outputs_mb || 0} MB`)),
-      h("p", { class: "hint" }, "GPU: 48 GB class serverless worker (about $1.22/h while awake). RunPod serverless does not expose live VRAM use or temperature, so those are not shown."),
+      h("p", { class: "hint" }, "GPU: serverless worker (measured about $1.75/h while awake; start-up and idle time are billed too). RunPod serverless does not expose live VRAM use or temperature, so those are not shown."),
       h("div", { class: "sp-bar" }, h("h3", { style: "margin:0;flex:1" }, "Recent projects"),
         h("button", { class: "sp-btn pri", onclick: () => window.showTab("projects") }, "Projects"), h("button", { class: "sp-btn", onclick: () => window.showTab("storyboard") }, "Storyboard"),
         h("button", { class: "sp-btn", onclick: () => window.showTab("editor") }, "Editor"), h("button", { class: "sp-btn", onclick: () => window.showTab("image") }, "Create image")),

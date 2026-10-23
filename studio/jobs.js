@@ -5,7 +5,7 @@
 (() => {
   const D = window.SDB, B = window.StudioBackend;
   const now = () => Date.now() / 1000;
-  const PRICE_PER_SEC = 1.22 / 3600;
+  const PRICE_PER_SEC = 1.75 / 3600;      // measured 2026-10-23 (RunPod currentSpendPerHr of the real worker); job seconds only, start-up/idle time is billed on top
   const flights = new Map();  // job id -> promise: one poll at a time per job, so a result is never saved twice
 
   const stripData = p => Object.fromEntries(Object.entries(p || {}).filter(([, v]) => !(typeof v === "string" && v.startsWith("data:"))));
