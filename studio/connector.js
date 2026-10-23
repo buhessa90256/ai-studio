@@ -89,16 +89,16 @@
       const gone = p ? null : ((await api("projects?deleted=1")).items || []).find(x => x.data && x.data.connector_id === d.movie_id);
       if (gone) { HIDDEN[d.movie_id] = { id: d.movie_id, title: d.title, localId: gone.id, status: d.status }; return; }   // deleted by the user: stays deleted until they restore it
       delete HIDDEN[d.movie_id];
-      const data = { ...(p ? p.data : {}), connector_id: d.movie_id, connector_status: d.status, connector_step: d.current_step || "", connector_import_mode: d.import_mode || "" };
+      const data = { ...(p ? p.data : {}), connector_id: d.movie_id, connector_status: d.status, connector_step: d.current_step || "", connector_import_mode: d.import_mode || "", connector_workflow: d.workflow ? { stage: d.workflow.stage, next: d.workflow.next_step, overview: d.workflow.storyboard, approved: d.workflow.scenes_approved, video: d.workflow.video } : null };
       if (!p) { p = await api("projects", { name: "Chat: " + d.title, aspect, resolution: aspect === "9:16" ? "768x1344" : aspect === "1:1" ? "1024x1024" : "1344x768", description: "Made in the chat connector", data, folder: "From chat" }); changed++; }
-      else if (p.data.connector_status !== d.status || p.data.connector_step !== data.connector_step || (p.data.connector_import_mode || "") !== data.connector_import_mode) { await api("projects", { id: p.id, name: p.name, aspect: p.aspect, data }); changed++; }
+      else if (p.data.connector_status !== d.status || p.data.connector_step !== data.connector_step || (p.data.connector_import_mode || "") !== data.connector_import_mode || JSON.stringify(p.data.connector_workflow || null) !== JSON.stringify(data.connector_workflow)) { await api("projects", { id: p.id, name: p.name, aspect: p.aspect, data }); changed++; }
       const scenes = (await api("scenes?project=" + p.id)).items;
       for (const s of d.scenes) {
         const ls = scenes.find(x => x.settings && x.settings.cn === s.scene_number);
         const settings = { ...(ls ? ls.settings : {}), cm: d.movie_id, cn: s.scene_number, cstate: s.state,
           cidentity: s.identity ? { overall: s.identity.overall, chars: Object.fromEntries(Object.entries(s.identity.characters || {}).map(([n, v]) => [n, { score: v.score, verdict: v.verdict }])) } : null,
           cattempts: (s.frame_attempts || []).map(a => ({ n: a.attempt, method: a.method, verdict: a.verdict, reasons: a.reasons || [] })),
-          cwarn: s.frame_warning || "", csource: s.frame_source || "", cmeta: s.frame_meta || null, cversions: (s.frame_versions || []).map(x => ({ v: x.version, url: x.url })) };
+          cwarn: s.frame_warning || "", csource: s.frame_source || "", cmeta: s.frame_meta || null, csb: s.storyboard || null, cversions: (s.frame_versions || []).map(x => ({ v: x.version, url: x.url })) };
         const lastTry = (s.frame_attempts || []).slice(-1)[0];
         settings.cflags = lastTry && lastTry.verdict !== "pass" ? (lastTry.reasons || []).slice(0, 4) : [];
         if (["frame_awaiting_approval", "frame_rejected"].includes(s.state)) settings.review = settings.review === "rejected" || s.state === "frame_rejected" ? "rejected" : "pending";
