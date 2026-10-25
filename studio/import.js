@@ -287,7 +287,7 @@
       const det = h("details", { class: "ws-sec", open: md !== "ai" }, h("summary", {}, `${SOURCES.find(x => x[0] === md)[1]} · ${scenes.filter(s => s.start_asset_url).length}/${scenes.length} frames`),
         h("div", { class: "in" }, wfBox, h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-bottom:6px" }, h("label", { class: "ds-small", for: "im-mode" }, "Storyboard image source"),
           h("select", { class: "im-sel", id: "im-mode", disabled: isChat(scenes[0] || {}), title: isChat(scenes[0] || {}) ? "A chat movie keeps the source it was created with." : "", onchange: async e => { try { await APP.saveProject(p, { data: { ...(p.data || {}), image_source: e.target.value } }); ctx.refresh && ctx.refresh(); } catch (er) { APP.fail(er, "Could not change the source"); } } },
-            SOURCES.map(([k, l]) => h("option", { value: k, selected: k === md }, l)))), h("div", { class: "im-steps" }, S.map((x, k) => h("span", { class: (x[1] ? "on" : "") + (k === cur ? " now" : ""), title: x[2] }, (x[1] ? "✓ " : "") + x[0] + (x[2] ? " " + x[2] : "")))),
+            SOURCES.map(([k, l]) => h("option", { value: k, selected: k === md }, l)))), vmProjectRow(p, scenes, ctx), h("div", { class: "im-steps" }, S.map((x, k) => h("span", { class: (x[1] ? "on" : "") + (k === cur ? " now" : ""), title: x[2] }, (x[1] ? "✓ " : "") + x[0] + (x[2] ? " " + x[2] : "")))),
           h("div", { class: "ds-row ds-wrap" }, h("button", { class: "ds-btn", onclick: () => bulk(p, scenes, { refresh: ctx.refresh }) }, icon("plus"), "Import frames…"), h("span", { class: "ds-small" }, `Videos left ≈ ${APP.money(left)} · start frames from import cost $0.00`)),
           h("div", {}, rows)));
       return det;
@@ -309,6 +309,40 @@
 
     // ------------------------------------------------------------------ Scene details: everything about ONE scene in one place (frame, cast, approval, video, errors)
     const STEPS6 = ["Request accepted", "Queued", "Worker assigned", "Generating", "Validating", "Ready for review"];
+    // ------------------------------------------------------------------ video model choice + "Compare video models" (the connector's registry is the single source of truth)
+    const VARIANTS = [["minimax_h3:high", "MiniMax H3 — Video + Audio"], ["wan22_i2v:fast", "Wan 2.2 — Video Only (Fast)"], ["wan22_i2v:full", "Wan 2.2 — Full Quality (Video Only)"]];
+    const vmLabel = v => (VARIANTS.find(x => x[0] === v) || VARIANTS[0])[1];
+    const vmDefault = (p, sc) => isChat(sc) ? (stOf(sc).cvmd || "minimax_h3:high") : (((p.data || {}).video_model) || "minimax_h3:high");
+    async function setSceneModel(p, sc, v) {   // "" = follow the movie
+      if (isChat(sc)) { const [m, pr] = v ? v.split(":") : ["default", ""]; const r = await post("set_video_model", stOf(sc), { model: m, preset: pr }); if (r.error || r.ok === false) throw new Error(txt(r.message || r.error, "Not saved.")); return txt(r.message, "Saved."); }
+      await APP.saveScene(sc, { settings: { ...stOf(sc), video_model: v || undefined } }); return "Saved.";
+    }
+    function vmProjectRow(p, scenes, ctx) {
+      const first = scenes[0] || {};
+      const cur = isChat(first) ? (stOf(first).cvmd || "minimax_h3:high") : (((p.data || {}).video_model) || "minimax_h3:high");
+      return h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-bottom:6px" }, h("label", { class: "ds-small", for: "im-vm" }, "Video model for all scenes"),
+        h("select", { class: "im-sel", id: "im-vm", onchange: async e => { try {
+          if (isChat(first)) { const [m, pr] = e.target.value.split(":"); const r = await post("set_video_model", stOf(first), { model: m, preset: pr, scene_number: 0 }); if (r.error || r.ok === false) throw new Error(txt(r.message || r.error, "Not saved.")); APP.toast(txt(r.message, "Saved."), "ok", 4200); }
+          else { await APP.saveProject(p, { data: { ...(p.data || {}), video_model: e.target.value } }); APP.toast("Video model saved.", "ok", 3000); }
+          if (APP.live && APP.live.refresh) APP.live.refresh(); ctx.refresh && ctx.refresh();
+        } catch (er) { APP.toast(String(er && er.message || er), "bad", 7000); } } }, VARIANTS.map(([v, l]) => h("option", { value: v, selected: v === cur }, l))),
+        h("span", { class: "ds-small" }, "One selector for the whole movie; a scene can override it in its details."));
+    }
+    async function compareFlow(p, sc, say) {   // plan (free) -> show cost + differences -> save the plan -> open the page where the cost is approved
+      const s = stOf(sc), sz = SIZE[p.aspect] || SIZE["9:16"];
+      const prompt = window.prompt("Motion prompt for the comparison (the same text goes to every model):", String(sc.action || "").slice(0, 600));
+      if (!prompt) return;
+      const body = { prompt, seconds: sc.duration || 6, width: sz[0], height: sz[1] };
+      say("Planning the comparison (free, no GPU)…");
+      const pl = await post("compare_plan", s, body);
+      if (pl.error) throw new Error(txt(pl.error, "The connector could not plan it."));
+      const lines = (pl.variants || []).map(v => `• ${v.label}: ` + (v.runnable ? `about ${APP.money(v.estimate.expected_usd)}, up to ${APP.money(v.estimate.max_usd)} (${v.estimate.confidence} confidence, ${v.estimate.basis.replace(/_/g, " ")})` : "NOT possible: " + (v.blocked || []).join("; ")));
+      const ok = await APP.confirm("Compare video models?", `Same starting picture and motion prompt for every model, run one after the other.\n${lines.join("\n")}\nTotal about ${APP.money(pl.totals.expected.usd)}, up to ${APP.money(pl.totals.conservative_max.usd)}.\n${(pl.differences || []).join("\n")}\n\nThis only SAVES the plan. Nothing is charged until you approve the cost on the next page.`, "Save plan & open");
+      if (!ok) return;
+      const made = await post("compare_create", s, body);
+      if (made.error || !made.page) throw new Error(txt(made.message || made.error, "The connector did not save the plan."));
+      window.open(made.page, "_blank");
+    }
     async function post(op, st, extra) {
       const act = actLink(); if (!act) throw new Error("This is a chat movie: ask your chat to open the studio app with actions allowed, then open that link on this device.");
       let r, j;
@@ -364,6 +398,11 @@
         const btns = [h("button", { class: "ds-btn", onclick: () => sheet(project, sc, { refresh, number: num(), scenes: ctx.scenes }) }, icon("img"), info.hasFrame ? "Replace image" : "Import image")];
         if ((st().frame_history || st().cversions || []).length > 1) btns.push(h("button", { class: "ds-btn ghost", onclick: () => versions(project, sc, { refresh, number: num() }) }, "Versions"));
         blocks.push(h("div", { class: "ds-row ds-wrap", style: "gap:8px" }, btns));
+        { const cur = isChat(sc) ? (stOf(sc).cvmo ? stOf(sc).cvm : "") : (stOf(sc).video_model || "");
+          const sel = h("select", { class: "im-sel", onchange: async e => { try { note = await setSceneModel(project, sc, e.target.value); err = ""; await refresh(); if (APP.live && APP.live.refresh) APP.live.refresh(); } catch (er) { fail(er); } } },
+            [h("option", { value: "", selected: !cur }, "Follow the movie: " + vmLabel(vmDefault(project, sc))), ...VARIANTS.map(([v, l]) => h("option", { value: v, selected: v === cur }, l))]);
+          blocks.push(h("div", { class: "ds-field", style: "margin-top:8px" }, h("label", {}, "Video model for this scene"), sel, h("div", { class: "im-mut" }, "MiniMax makes video with sound; Wan makes silent video at 16 fps. Changing it never changes a video already made.")));
+          if (chat() && info.hasFrame && info.approved) blocks.push(h("div", { class: "ds-row ds-wrap", style: "gap:8px;margin-top:6px" }, h("button", { class: "ds-btn", disabled: busy, onclick: () => APP.once("compare:" + sc.id, async () => { try { busy = true; await compareFlow(project, sc, m => { note = m; render(); }); note = "The comparison page opened in a new tab: check the cost there and approve it."; err = ""; } catch (er) { err = String(er && er.message || er); note = ""; } busy = false; render(); }) }, icon("play"), "Compare video models…"), h("span", { class: "im-mut" }, "Free to plan; you approve the cost before anything runs.")));  }
         // approval + video
         const vb = [];
         if (chat()) {

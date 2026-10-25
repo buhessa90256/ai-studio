@@ -98,7 +98,7 @@
         const settings = { ...(ls ? ls.settings : {}), cm: d.movie_id, cn: s.scene_number, cstate: s.state,
           cidentity: s.identity ? { overall: s.identity.overall, chars: Object.fromEntries(Object.entries(s.identity.characters || {}).map(([n, v]) => [n, { score: v.score, verdict: v.verdict }])) } : null,
           cattempts: (s.frame_attempts || []).map(a => ({ n: a.attempt, method: a.method, verdict: a.verdict, reasons: a.reasons || [] })),
-          cwarn: s.frame_warning || "", csource: s.frame_source || "", cmeta: s.frame_meta || null, csb: s.storyboard || null, cversions: (s.frame_versions || []).map(x => ({ v: x.version, url: x.url })) };
+          cwarn: s.frame_warning || "", csource: s.frame_source || "", cmeta: s.frame_meta || null, csb: s.storyboard || null, cvm: s.video_model || "", cvmo: !!s.video_model_override, cvmd: (d.video_model && d.video_model.default) || "minimax_h3:high", cversions: (s.frame_versions || []).map(x => ({ v: x.version, url: x.url })) };
         const lastTry = (s.frame_attempts || []).slice(-1)[0];
         settings.cflags = lastTry && lastTry.verdict !== "pass" ? (lastTry.reasons || []).slice(0, 4) : [];
         if (["frame_awaiting_approval", "frame_rejected"].includes(s.state)) settings.review = settings.review === "rejected" || s.state === "frame_rejected" ? "rejected" : "pending";

@@ -156,6 +156,11 @@
     sc = await patch(sc, { status: "keyframe_generating", job_id: job, error: "", settings: { ...(sc.settings || {}), autotry: attempt } });
     return track(sc, "keyframe");
   }
+  // ---- video model (the connector's registry: video_models.py). Project default in project.data.video_model, per-scene override in scene.settings.video_model; MiniMax H3 stays the default.
+  const VMODELS = [["minimax_h3:high", "MiniMax H3 — Video + Audio"], ["wan22_i2v:fast", "Wan 2.2 — Video Only (Fast)"], ["wan22_i2v:full", "Wan 2.2 — Full Quality (Video Only)"]];
+  const normVm = v => v === "wan22_i2v" ? "wan22_i2v:fast" : v === "minimax_h3" ? "minimax_h3:high" : v;
+  const videoModelOf = sc => normVm((sc.settings || {}).video_model || ((S.project && S.project.data) || {}).video_model || "minimax_h3:high");
+  const vmLabel = v => (VMODELS.find(x => x[0] === normVm(v)) || VMODELS[0])[1];
   async function makeVideo(sc) {
     const idx = S.scenes.findIndex(x => x.id === sc.id), prev = idx > 0 ? S.scenes[idx - 1] : null;
     if (sc.chain_prev && prev && prev.video_asset) {  // continuity: start where the previous scene ended
@@ -167,7 +172,9 @@
     const p = await api(`scenes/${sc.id}/prompt`);
     const params = { prompt: p.video_prompt, image: await fitToShape(sc.start_asset_url, w, hh), width: w, height: hh, seconds: sc.duration, quality: ((sc.settings || {}).quality === "fast" ? "fast" : "high") };  // exactly the video's shape: the model must not resize (stretch) it
     if (sc.end_asset) params.last_image = await fitToShape(sc.end_asset_url, w, hh);
-    const job = await generate({ tool: "minimax_h3", params });
+    const vmv = videoModelOf(sc), wan = vmv.startsWith("wan22_i2v");
+    if (wan) { delete params.quality; delete params.last_image; params.prompt = String(params.prompt || "").replace(/(Dialogue|Sound effects):[^.]*\.?/gi, "").replace(/\s{2,}/g, " ").trim(); }   // Wan: silent, no end frame, dialogue / sound lines are useless to it
+    const job = await generate({ tool: wan ? (vmv.endsWith(":full") ? "wan_i2v_full" : "wan_i2v") : "minimax_h3", params });
     sc = await patch(sc, { status: "generating", job_id: job, error: "" });
     return track(sc, "video");
   }
@@ -215,6 +222,8 @@
     const chars = h("div", { class: "sp-pick" }, S.chars.map(c => { const b = h("button", { class: "sp-btn" + (sc.characters.includes(c.id) ? " on" : ""), type: "button" }, c.thumb ? h("img", { src: c.thumb }) : null, c.name);
       b.onclick = () => { const k = sc.characters.indexOf(c.id); k < 0 ? sc.characters.push(c.id) : sc.characters.splice(k, 1); b.classList.toggle("on", k < 0); auto(); }; return b; }));
     const dur = h("input", { type: "number", min: 2, max: 60, value: sc.duration }); dur.oninput = () => { sc.duration = +dur.value || 6; auto(); };
+    const vmSel = h("select", { title: "Video model for this scene" }, [h("option", { value: "" }, "Follow the project: " + vmLabel(videoModelOf({}))), ...VMODELS.map(([v, l]) => h("option", { value: v, selected: ((sc.settings || {}).video_model || "") === v }, l))]);
+    vmSel.onchange = () => { sc.settings = sc.settings || {}; if (vmSel.value) sc.settings.video_model = vmSel.value; else delete sc.settings.video_model; auto(); };
     const frame = (label, key, extra) => h("div", { class: "sb-frame" }, h("b", { style: "font-size:13px" }, label),
       h("div", { class: "pic" }, sc[key + "_url"] ? h("img", { src: sc[key + "_url"] }) : "none"),
       h("div", { class: "actions" }, h("button", { class: "sp-btn", onclick: guard(async () => { const a = await pickAsset(); if (a) await patch(sc, { [key]: a.id, status: key === "start_asset" && sc.status === "draft" ? "keyframe_ready" : sc.status }); }) }, "Pick / upload"),
@@ -227,6 +236,7 @@
     chain.firstChild.onchange = e => { sc.chain_prev = e.target.checked ? 1 : 0; auto(); };
     card.append(h("div", { class: "sb-body" },
       h("div", { class: "sp-two" }, field("title", "Scene title"), h("div", {}, h("label", {}, "Duration (seconds)"), dur)),
+      h("div", {}, h("label", {}, "Video model for this scene"), vmSel, h("div", { class: "hint" }, "MiniMax H3 makes video with sound; Wan 2.2 makes silent video at 16 fps. Changing it never changes a video already made. Wan Full Quality is slow and costs about ten times Fast.")),
       field("purpose", "Story purpose", "Why this scene exists in the story"),
       h("div", { class: "sp-three" }, field("location", "Location", "hallway"), field("time_of_day", "Time of day", "morning"), field("lighting", "Lighting", "warm, soft")),
       field("props", "Props", "golden key"), h("label", {}, "Characters in this scene"), chars,
@@ -281,6 +291,7 @@
       total > p.duration * 1.15 || total < p.duration * 0.85 ? " — duration differs from the target." : ""),
       h("div", { class: "sp-bar" }, h("label", { class: "check", style: "margin:0" }, (() => { const c = h("input", { type: "checkbox", checked: approved }); c.onchange = guard(() => setApproved(c.checked)); return c; })(),
         " Storyboard approved — allows spending GPU time on videos"),
+        (() => { const m = h("select", { title: "Video model for every scene without its own choice" }, VMODELS.map(([v, l]) => h("option", { value: v, selected: videoModelOf({}) === v }, l))); m.onchange = guard(async () => { S.project = await api("projects", { ...p, data: { ...p.data, video_model: m.value } }); draw(); }); return h("label", { class: "check", style: "margin:0" }, "Video model: ", m); })(),
         h("button", { class: "sp-btn pri", disabled: !approved || !S.scenes.length, onclick: guard(generateAll) }, "Generate all videos")));
     if (!S.scenes.length) r.append(h("p", { class: "sp-empty" }, "No scenes yet. Use Auto-plan, Import scenes, or + Scene."));
     S.scenes.forEach((sc, i) => r.append(sceneCard(sc, i)));

@@ -177,9 +177,9 @@ function klein_edit(p) {
 
 function wan_i2v(p) {
   const [name, uploads] = upload(p);
-  const w = roundTo(p.width ?? 832, 16, 256, 1280), h = roundTo(p.height ?? 480, 16, 256, 1280);
+  const w = roundTo(p.width ?? 832, 16, 256, 1920), h = roundTo(p.height ?? 480, 16, 256, 1920);   // was capped at 1280 (a 768x1344 picture was cropped)
   const seconds = Math.max(1, Math.min(10, num(p.seconds, 5)));
-  const length = Math.floor(seconds * 16 + 1);
+  const length = 4 * Math.round(seconds * 16 / 4) + 1;
   return [{
     "1": { class_type: "UNETLoader", inputs: { unet_name: WAN_HIGH, weight_dtype: "default" } },
     "2": { class_type: "UNETLoader", inputs: { unet_name: WAN_LOW, weight_dtype: "default" } },
@@ -208,6 +208,48 @@ function wan_i2v(p) {
     "15": { class_type: "VAEDecode", inputs: { samples: ["14", 0], vae: ["8", 0] } },
     "16": { class_type: "CreateVideo", inputs: { images: ["15", 0], fps: 16.0 } },
     "17": { class_type: "SaveVideo", inputs: { video: ["16", 0], filename_prefix: "video/wan_i2v", format: "auto", codec: "auto" } },
+  }, uploads];
+}
+
+function wanSwitchStep(steps, shift, boundary) {   // first step whose shifted noise level is below the official high->low boundary (shift 5.0, boundary 0.9)
+  for (let i = 0; i < steps; i++) { const s = 1 - i / steps; if (shift * s / (1 + (shift - 1) * s) < boundary) return i; }
+  return steps;
+}
+
+function wan_i2v_full(p) {   // Wan 2.2 A14B without the 4-step LoRAs: cfg 3.5 (two passes per step), shift 5.0, hand-over at the 0.9 boundary, 16 fps; about 10x the work of wan_i2v
+  const [name, uploads] = upload(p);
+  const w = roundTo(p.width ?? 832, 16, 256, 1920), h = roundTo(p.height ?? 480, 16, 256, 1920);
+  const seconds = Math.max(1, Math.min(10, num(p.seconds, 5)));
+  const length = 4 * Math.round(seconds * 16 / 4) + 1;
+  const steps = Math.max(4, Math.min(50, Math.round(num(p.steps, 20)))), cfg = Math.max(1, Math.min(8, num(p.cfg, 3.5))), shift = num(p.shift, 5.0);
+  const sampler = ["uni_pc", "euler", "uni_pc_bh2"].includes(p.sampler) ? p.sampler : "uni_pc";
+  const sw = wanSwitchStep(steps, shift, num(p.boundary, 0.9));
+  return [{
+    "1": { class_type: "UNETLoader", inputs: { unet_name: WAN_HIGH, weight_dtype: "default" } },
+    "2": { class_type: "UNETLoader", inputs: { unet_name: WAN_LOW, weight_dtype: "default" } },
+    "5": { class_type: "ModelSamplingSD3", inputs: { model: ["1", 0], shift } },
+    "6": { class_type: "ModelSamplingSD3", inputs: { model: ["2", 0], shift } },
+    "7": { class_type: "CLIPLoader", inputs: { clip_name: WAN_CLIP, type: "wan", device: "default" } },
+    "8": { class_type: "VAELoader", inputs: { vae_name: WAN_VAE } },
+    "9": { class_type: "CLIPTextEncode", inputs: { clip: ["7", 0], text: p.prompt || "" } },
+    "10": { class_type: "CLIPTextEncode", inputs: { clip: ["7", 0], text: WAN_NEGATIVE } },
+    "11": { class_type: "LoadImage", inputs: { image: name } },
+    "12": { class_type: "WanImageToVideo", inputs: {
+      positive: ["9", 0], negative: ["10", 0], vae: ["8", 0], start_image: ["11", 0],
+      width: w, height: h, length, batch_size: 1 } },
+    "13": { class_type: "KSamplerAdvanced", inputs: {
+      model: ["5", 0], positive: ["12", 0], negative: ["12", 1], latent_image: ["12", 2],
+      add_noise: "enable", noise_seed: seedOf(p), steps, cfg,
+      sampler_name: sampler, scheduler: "simple", start_at_step: 0, end_at_step: sw,
+      return_with_leftover_noise: "enable" } },
+    "14": { class_type: "KSamplerAdvanced", inputs: {
+      model: ["6", 0], positive: ["12", 0], negative: ["12", 1], latent_image: ["13", 0],
+      add_noise: "disable", noise_seed: 0, steps, cfg,
+      sampler_name: sampler, scheduler: "simple", start_at_step: sw, end_at_step: 10000,
+      return_with_leftover_noise: "disable" } },
+    "15": { class_type: "VAEDecode", inputs: { samples: ["14", 0], vae: ["8", 0] } },
+    "16": { class_type: "CreateVideo", inputs: { images: ["15", 0], fps: 16.0 } },
+    "17": { class_type: "SaveVideo", inputs: { video: ["16", 0], filename_prefix: "video/wan_i2v_full", format: "auto", codec: "auto" } },
   }, uploads];
 }
 
@@ -596,5 +638,5 @@ function fetch_result(params) {
 }
 
 // klein_*, ltx2_t2v and hunyuan_3d stay above for reference; their models were removed from the volume.
-const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_animate, minimax_h3, talking_avatar, full_video,
+const TOOLS = { qwen_image, qwen_edit, wan_i2v, wan_i2v_full, wan_animate, minimax_h3, talking_avatar, full_video,
   stable_audio, f5_voice, seedvr2_upscale, trellis_3d, hy_motion, wake_up, fetch_result };
