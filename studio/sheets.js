@@ -8,6 +8,13 @@
     return `${m[1]}/sheets/${m[2]}` + (a ? `?act=${a}` : "");
   }
   window.sheetExtractorUrl = url;
+  // Smart Character Creator: Create Character -> Upload Master Sheet -> Auto-Split & Classify (the connector's review page; CPU only, no GPU)
+  window.characterCreatorUrl = () => url().replace("/sheets/", "/chars/");
+  window.openCharacterCreator = () => {
+    const u = window.characterCreatorUrl();
+    if (!u) { alert("Connect to your chat first: in ChatGPT or Claude say “open in studio app”, then open that link on this device."); return; }
+    window.open(u, "_blank", "noopener");
+  };
   window.openSheetExtractor = () => {
     const u = url();
     if (!u) { alert("Connect to your chat first: in ChatGPT or Claude say “open in studio app”, then open that link on this device."); return; }
