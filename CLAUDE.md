@@ -137,3 +137,5 @@ One selector, the connector's registry (`connector/video_models.py`): MiniMax H3
 
 ## Storyboard sheets (2026-10-25)
 `studio/sheets.js` builds the address of the connector's Storyboard sheet extractor page (`<host>/sheets/<read token>?act=<action token>`) from the saved chat link (`connector_url` / `connector_act`) and `window.openSheetExtractor()` opens it; Home shows a "Storyboard sheets" button while chat-connected. The page itself (upload, adjustable crop boxes, six-scene grid, original-vs-extracted comparison, reorder, approve/reject, export ZIP, import into a movie) is served by the connector (`connector/sheets_page.py`), so phone and PC share one code path. Free: CPU only, never a GPU job.
+
+Enhancement (E2) lives in the same connector page (section "Enhance with AI"); the phone app has nothing extra to maintain. Box handles are about 30 px on screen and use touch-action:none so a finger drags them instead of scrolling the page; the compare dialog panes scroll with one finger and zoom with the slider.
