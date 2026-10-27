@@ -10,6 +10,13 @@
   window.sheetExtractorUrl = url;
   // Smart Character Creator: Create Character -> Upload Master Sheet -> Auto-Split & Classify (the connector's review page; CPU only, no GPU)
   window.characterCreatorUrl = () => url().replace("/sheets/", "/chars/");
+  // Master Character Library: Characters -> select a character -> Master Character (views, identity, history; approve/reject on this page; no generation)
+  window.masterCharactersUrl = () => url().replace("/sheets/", "/master/");
+  window.openMasterCharacters = () => {
+    const u = window.masterCharactersUrl();
+    if (!u) { alert("Connect to your chat first: in ChatGPT or Claude say “open in studio app”, then open that link on this device."); return; }
+    window.open(u, "_blank", "noopener");
+  };
   window.openCharacterCreator = () => {
     const u = window.characterCreatorUrl();
     if (!u) { alert("Connect to your chat first: in ChatGPT or Claude say “open in studio app”, then open that link on this device."); return; }
